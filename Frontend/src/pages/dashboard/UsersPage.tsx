@@ -27,6 +27,7 @@ import type { User, Organization } from '../../types/auth';
 import toast from 'react-hot-toast';
 import { SkeletonTable } from '../../components/ui/SkeletonTable';
 import { subscriptionService } from '../../services/subscription.service';
+import { Drawer } from '../../components/ui/Drawer';
 
 const ROLE_LABELS: Record<string, string> = {
     facility_admin: 'Facility Admin',
@@ -132,6 +133,18 @@ export function UsersPage() {
         return true;
     };
 
+    const handleOpenAddStaff = () => {
+        if (isLimitsLoading) {
+            toast('Checking plan limits, please wait...');
+            return;
+        }
+        if (!limitsCanAddUsers) {
+            toast.error('User limit reached for your current plan.');
+            return;
+        }
+        setShowAddModal(true);
+    };
+
     return (
         <ProtectedRoute
             allowedRoles={[
@@ -158,10 +171,10 @@ export function UsersPage() {
                     </div>
                     {roleCanAddStaff && (
                         <button
-                            onClick={() => setShowAddModal(true)}
-                            disabled={!limitsCanAddUsers || isLimitsLoading}
+                            onClick={handleOpenAddStaff}
+                            disabled={isLimitsLoading}
                             title={!limitsCanAddUsers ? 'User limit reached for your plan' : undefined}
-                            className="flex items-center gap-2 px-4 py-2.5 bg-healthcare-primary text-white rounded-xl font-bold text-sm hover:bg-teal-600 transition-all shadow-md"
+                            className="flex items-center gap-2 px-4 py-2.5 bg-healthcare-primary text-white rounded-xl font-bold text-sm hover:bg-teal-600 transition-all shadow-md disabled:opacity-60 disabled:cursor-not-allowed"
                         >
                             <Plus size={18} />
                             Add staff
@@ -865,15 +878,15 @@ function AddStaffModal({
     };
 
     return (
-        <div
-            className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50"
-            onClick={onClose}
+        <Drawer
+            isOpen
+            onClose={onClose}
+            size="md"
+            title="Add staff member"
+            subtitle="Create a new user and assign role/facility"
+            showOverlay
         >
-            <div
-                className="bg-white dark:bg-slate-900 rounded-2xl shadow-xl max-w-md w-full p-6"
-                onClick={(e) => e.stopPropagation()}
-            >
-                <h2 className="text-xl font-black text-healthcare-dark mb-4">Add staff member</h2>
+            <div className="p-6">
                 <p className="text-sm text-slate-500 mb-4">
                     Create a new user with a role. They will receive an email with a link to verify
                     their email and set their own password, plus their role and where they are
@@ -986,6 +999,6 @@ function AddStaffModal({
                     </div>
                 </form>
             </div>
-        </div>
+        </Drawer>
     );
 }

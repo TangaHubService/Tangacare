@@ -46,7 +46,7 @@ const batchSchema = yup.object({
             return !Number.isNaN(d.getTime()) && d > new Date();
         }),
     manufacturing_date: yup.string().optional(),
-    unit_cost: yup.number().min(0, 'Cannot be negative').required('Required'),
+    unit_cost: yup.number().min(0, 'Cannot be negative').default(0),
 });
 
 const addStockSchema = yup.object({
@@ -94,7 +94,7 @@ export function AddStockModal({
         defaultValues: {
             medicine_id: 0,
             storage_location_id: undefined,
-            batches: [{ batch_number: '', quantity: 1, expiry_date: '' }],
+            batches: [{ batch_number: '', quantity: 1, expiry_date: '', unit_cost: 0 }],
         },
     });
 
@@ -108,7 +108,7 @@ export function AddStockModal({
             reset({
                 medicine_id: 0,
                 storage_location_id: undefined,
-                batches: [{ batch_number: '', quantity: 1, expiry_date: '' }],
+                batches: [{ batch_number: '', quantity: 1, expiry_date: '', unit_cost: 0 }],
             });
             setSelectedMedicine(null);
             setSearchQuery('');
@@ -375,7 +375,12 @@ export function AddStockModal({
                             <button
                                 type="button"
                                 onClick={() =>
-                                    append({ batch_number: '', quantity: 1, expiry_date: '' })
+                                    append({
+                                        batch_number: '',
+                                        quantity: 1,
+                                        expiry_date: '',
+                                        unit_cost: 0,
+                                    })
                                 }
                                 className="text-[10px] font-black uppercase text-healthcare-primary hover:text-teal-700 flex items-center gap-1 transition-colors"
                             >
