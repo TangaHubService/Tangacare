@@ -3,20 +3,21 @@
 This repository contains two Tangacare applications:
 
 - `Backend`: Express + TypeScript backend API
-- `Fronted`: React + TypeScript + Vite frontend
+- `Frontend`: React + TypeScript + Vite frontend
 
 ## Repository Structure
 
 ```text
 Tangacare/
 ├── Backend/   # Backend API (Node.js, Express, TypeORM, PostgreSQL)
-├── Fronted/   # Frontend web app (React, Vite, TypeScript)
+├── Frontend/  # Frontend web app (React, Vite, TypeScript)
 └── README.md
 ```
 
 ## Prerequisites
 
-- Node.js >= 18
+- Node.js >= 18 (Backend)
+- Node.js >= 20.19 (Frontend)
 - Yarn >= 1.22
 - PostgreSQL >= 13 (for backend)
 - Docker and Docker Compose (optional, for local DB/services)
@@ -52,12 +53,12 @@ Useful backend URLs:
 - OpenAPI JSON: `http://localhost:3000/api-docs.json`
 - Health check: `http://localhost:3000/health`
 
-### 2) Frontend Setup (`Fronted`)
+### 2) Frontend Setup (`Frontend`)
 
 Open a new terminal:
 
 ```bash
-cd Fronted
+cd Frontend
 yarn install
 yarn dev
 ```
@@ -75,7 +76,7 @@ Vite will print the local frontend URL (commonly `http://localhost:5173`).
 - `yarn migration:revert` - Revert last migration
 - `yarn test` - Run tests
 
-### Frontend (`Fronted`)
+### Frontend (`Frontend`)
 
 - `yarn dev` - Start Vite dev server
 - `yarn build` - Build frontend for production
@@ -94,4 +95,16 @@ Vite will print the local frontend URL (commonly `http://localhost:5173`).
 For deeper details:
 
 - Backend: `Backend/README.md`
-- Frontend: `Fronted/README.md`
+- Frontend: `Frontend/README.md`
+
+## Frontend Deployment (Dokploy/Nixpacks)
+
+If deployment fails with:
+
+`@vitejs/plugin-react ... Expected "^20.19.0 || >=22.12.0". Got "18.x"`
+
+set frontend runtime to Node 20+:
+
+- App root: `Frontend`
+- Node version: `20` (or newer)
+- Re-deploy after updating settings
