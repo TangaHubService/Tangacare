@@ -1,0 +1,510 @@
+{
+    "info": {
+        "name": "Tangacare Chat & Notifications API",
+        "_postman_id": "tangacare-chat-api-collection",
+        "description": "# Tangacare Real-Time Chat & Notifications API\n\nComplete API documentation for the real-time chat and notification system.\n\n## Overview\n\nThis collection provides comprehensive documentation for:\n- **Real-time messaging** between doctors and patients\n- **Conversation management** with privacy controls\n- **Read/unread tracking** with per-user read receipts\n- **Notifications** with offline persistence\n- **Online status** tracking for active users\n\n## Authentication\n\nAll endpoints require JWT authentication. Include the access token in the Authorization header:\n```\nAuthorization: Bearer <your_access_token>\n```\n\n## Base URL\n- **Development**: `http://localhost:3000`\n- **Production**: `https://api.tangacare.com`\n\n## Socket.IO Real-Time Events\n\nFor real-time features, connect to Socket.IO with authentication:\n```javascript\nconst socket = io('http://localhost:3000', {\n  auth: { token: 'your_jwt_token' }\n});\n```\n\n## Key Features\n\n✅ Private doctor-patient messaging\n✅ Real-time message delivery via Socket.IO\n✅ Read receipts and typing indicators\n✅ Unread message counts\n✅ Online/offline status tracking\n✅ Persistent notifications for offline users\n✅ Message history with pagination\n✅ Full privacy and access controls",
+        "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+    },
+    "variable": [
+        {
+            "key": "base_url",
+            "value": "http://localhost:3000",
+            "type": "string"
+        },
+        {
+            "key": "access_token",
+            "value": "",
+            "type": "string"
+        },
+        {
+            "key": "conversation_id",
+            "value": "1",
+            "type": "string"
+        },
+        {
+            "key": "message_id",
+            "value": "1",
+            "type": "string"
+        },
+        {
+            "key": "notification_id",
+            "value": "1",
+            "type": "string"
+        }
+    ],
+    "item": [
+        {
+            "name": "Chat - Conversations",
+            "description": "Manage chat conversations between doctors and patients. Each conversation is private and unique to a doctor-patient pair.",
+            "item": [
+                {
+                    "name": "Create Conversation",
+                    "request": {
+                        "method": "POST",
+                        "header": [
+                            {
+                                "key": "Authorization",
+                                "value": "Bearer {{access_token}}",
+                                "description": "JWT access token from login"
+                            },
+                            {
+                                "key": "Content-Type",
+                                "value": "application/json"
+                            }
+                        ],
+                        "body": {
+                            "mode": "raw",
+                            "raw": "{\n  \"doctorId\": 1\n}",
+                            "options": {
+                                "raw": {
+                                    "language": "json"
+                                }
+                            }
+                        },
+                        "url": {
+                            "raw": "{{base_url}}/api/chat/conversations",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "api",
+                                "chat",
+                                "conversations"
+                            ]
+                        },
+                        "description": "# Create a New Conversation\n\nCreates a new chat conversation between a patient and a doctor. If a conversation already exists between the same patient and doctor, it returns the existing conversation.\n\n## Request Body\n\n| Field | Type | Required | Description |\n|-------|------|----------|-------------|\n| doctorId | integer | Yes | The ID of the doctor to start a conversation with |\n\n## Response\n\n**Success (201 Created)**\n```json\n{\n  \"success\": true,\n  \"data\": {\n    \"id\": 1,\n    \"patient_id\": 5,\n    \"doctor_id\": 1,\n    \"last_message\": null,\n    \"last_message_at\": null,\n    \"created_at\": \"2026-01-13T20:30:00Z\",\n    \"updated_at\": \"2026-01-13T20:30:00Z\"\n  }\n}\n```\n\n## Authorization\n\n- **Patient**: Can create conversations with any doctor\n- **Doctor**: Cannot create conversations (patients initiate)\n\n## Notes\n\n- Conversations are unique per doctor-patient pair\n- If a conversation already exists, it returns the existing one\n- The conversation ID is used for all subsequent messaging"
+                    },
+                    "response": []
+                },
+                {
+                    "name": "Get User's Conversations",
+                    "request": {
+                        "method": "GET",
+                        "header": [
+                            {
+                                "key": "Authorization",
+                                "value": "Bearer {{access_token}}",
+                                "description": "JWT access token"
+                            }
+                        ],
+                        "url": {
+                            "raw": "{{base_url}}/api/chat/conversations",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "api",
+                                "chat",
+                                "conversations"
+                            ]
+                        },
+                        "description": "# Get All Conversations\n\nRetrieves all conversations for the authenticated user (patient or doctor). Includes unread message counts and online status of the other participant.\n\n## Response\n\n**Success (200 OK)**\n```json\n{\n  \"success\": true,\n  \"data\": [\n    {\n      \"id\": 1,\n      \"patient_id\": 5,\n      \"doctor_id\": 1,\n      \"last_message\": \"Hello doctor, I need help\",\n      \"last_message_at\": \"2026-01-13T20:35:00Z\",\n      \"created_at\": \"2026-01-13T20:30:00Z\",\n      \"updated_at\": \"2026-01-13T20:35:00Z\",\n      \"unread_count\": 2,\n      \"other_user\": {\n        \"id\": 3,\n        \"first_name\": \"Dr. John\",\n        \"last_name\": \"Smith\",\n        \"profile_picture_url\": \"https://example.com/avatar.jpg\",\n        \"is_online\": true,\n        \"last_seen\": \"2026-01-13T20:40:00Z\"\n      }\n    }\n  ]\n}\n```\n\n## Response Fields\n\n| Field | Type | Description |\n|-------|------|-------------|\n| id | integer | Conversation ID |\n| patient_id | integer | Patient user ID |\n| doctor_id | integer | Doctor ID |\n| last_message | string | Text of the last message |\n| last_message_at | datetime | Timestamp of last message |\n| unread_count | integer | Number of unread messages for current user |\n| other_user | object | Details of the other participant |\n| other_user.is_online | boolean | Whether the other user is currently online |\n| other_user.last_seen | datetime | Last time the user was online |\n\n## Sorting\n\n- Conversations are sorted by `last_message_at` (most recent first)\n- Conversations with no messages appear at the bottom"
+                    },
+                    "response": []
+                },
+                {
+                    "name": "Get Conversation Details",
+                    "request": {
+                        "method": "GET",
+                        "header": [
+                            {
+                                "key": "Authorization",
+                                "value": "Bearer {{access_token}}"
+                            }
+                        ],
+                        "url": {
+                            "raw": "{{base_url}}/api/chat/conversations/{{conversation_id}}",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "api",
+                                "chat",
+                                "conversations",
+                                "{{conversation_id}}"
+                            ]
+                        },
+                        "description": "# Get Conversation Details\n\nRetrieves details of a specific conversation including participant information.\n\n## URL Parameters\n\n| Parameter | Type | Description |\n|-----------|------|-------------|\n| id | integer | Conversation ID |\n\n## Response\n\n**Success (200 OK)**\n```json\n{\n  \"success\": true,\n  \"data\": {\n    \"id\": 1,\n    \"patient_id\": 5,\n    \"doctor_id\": 1,\n    \"last_message\": \"Thank you doctor\",\n    \"last_message_at\": \"2026-01-13T20:45:00Z\",\n    \"created_at\": \"2026-01-13T20:30:00Z\",\n    \"updated_at\": \"2026-01-13T20:45:00Z\",\n    \"patient\": {\n      \"id\": 5,\n      \"first_name\": \"Jane\",\n      \"last_name\": \"Doe\",\n      \"phone_number\": \"+250788123456\"\n    },\n    \"doctor\": {\n      \"id\": 1,\n      \"user_id\": 3,\n      \"specialization\": \"Cardiology\",\n      \"license_number\": \"RMDC-001/2026\"\n    }\n  }\n}\n```\n\n## Privacy\n\n- Users can only access conversations they are part of\n- Returns 401 Unauthorized if user is not a participant"
+                    },
+                    "response": []
+                }
+            ]
+        },
+        {
+            "name": "Chat - Messages",
+            "description": "Send and retrieve messages within conversations. Supports text, images, and file attachments.",
+            "item": [
+                {
+                    "name": "Get Messages",
+                    "request": {
+                        "method": "GET",
+                        "header": [
+                            {
+                                "key": "Authorization",
+                                "value": "Bearer {{access_token}}"
+                            }
+                        ],
+                        "url": {
+                            "raw": "{{base_url}}/api/chat/conversations/{{conversation_id}}/messages?page=1&limit=50",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "api",
+                                "chat",
+                                "conversations",
+                                "{{conversation_id}}",
+                                "messages"
+                            ],
+                            "query": [
+                                {
+                                    "key": "page",
+                                    "value": "1",
+                                    "description": "Page number (default: 1)"
+                                },
+                                {
+                                    "key": "limit",
+                                    "value": "50",
+                                    "description": "Messages per page (default: 50, max: 100)"
+                                }
+                            ]
+                        },
+                        "description": "# Get Conversation Messages\n\nRetrieves paginated messages from a conversation. Messages are returned in chronological order (oldest first).\n\n## URL Parameters\n\n| Parameter | Type | Description |\n|-----------|------|-------------|\n| id | integer | Conversation ID |\n\n## Query Parameters\n\n| Parameter | Type | Default | Description |\n|-----------|------|---------|-------------|\n| page | integer | 1 | Page number for pagination |\n| limit | integer | 50 | Number of messages per page (max: 100) |\n\n## Response\n\n**Success (200 OK)**\n```json\n{\n  \"success\": true,\n  \"data\": {\n    \"messages\": [\n      {\n        \"id\": 1,\n        \"conversation_id\": 1,\n        \"sender_id\": 5,\n        \"sender_type\": \"patient\",\n        \"content\": \"Hello doctor, I have chest pain\",\n        \"message_type\": \"text\",\n        \"file_url\": null,\n        \"created_at\": \"2026-01-13T20:35:00Z\",\n        \"updated_at\": \"2026-01-13T20:35:00Z\",\n        \"sender\": {\n          \"id\": 5,\n          \"first_name\": \"Jane\",\n          \"last_name\": \"Doe\"\n        },\n        \"reads\": [\n          {\n            \"user_id\": 3,\n            \"read_at\": \"2026-01-13T20:36:00Z\"\n          }\n        ]\n      }\n    ],\n    \"total\": 25,\n    \"page\": 1,\n    \"totalPages\": 1\n  }\n}\n```\n\n## Message Types\n\n| Type | Description |\n|------|-------------|\n| text | Plain text message |\n| image | Image attachment (file_url contains image URL) |\n| file | File attachment (file_url contains file URL) |\n\n## Sender Types\n\n| Type | Description |\n|------|-------------|\n| patient | Message sent by patient |\n| doctor | Message sent by doctor |\n\n## Pagination\n\n- Use `page` and `limit` to paginate through messages\n- `totalPages` indicates total number of pages\n- Load older messages by incrementing `page`"
+                    },
+                    "response": []
+                },
+                {
+                    "name": "Send Message",
+                    "request": {
+                        "method": "POST",
+                        "header": [
+                            {
+                                "key": "Authorization",
+                                "value": "Bearer {{access_token}}"
+                            },
+                            {
+                                "key": "Content-Type",
+                                "value": "application/json"
+                            }
+                        ],
+                        "body": {
+                            "mode": "raw",
+                            "raw": "{\n  \"content\": \"I have been experiencing chest pain for the past 2 days\",\n  \"message_type\": \"text\"\n}",
+                            "options": {
+                                "raw": {
+                                    "language": "json"
+                                }
+                            }
+                        },
+                        "url": {
+                            "raw": "{{base_url}}/api/chat/conversations/{{conversation_id}}/messages",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "api",
+                                "chat",
+                                "conversations",
+                                "{{conversation_id}}",
+                                "messages"
+                            ]
+                        },
+                        "description": "# Send a Message\n\nSends a new message in a conversation. The message is also broadcast in real-time via Socket.IO to connected users.\n\n## URL Parameters\n\n| Parameter | Type | Description |\n|-----------|------|-------------|\n| id | integer | Conversation ID |\n\n## Request Body\n\n| Field | Type | Required | Description |\n|-------|------|----------|-------------|\n| content | string | Yes | Message text content |\n| message_type | string | No | Type: 'text', 'image', 'file' (default: 'text') |\n| file_url | string | No | URL of uploaded file/image (required for image/file types) |\n\n## Response\n\n**Success (201 Created)**\n```json\n{\n  \"success\": true,\n  \"data\": {\n    \"id\": 15,\n    \"conversation_id\": 1,\n    \"sender_id\": 5,\n    \"sender_type\": \"patient\",\n    \"content\": \"I have been experiencing chest pain\",\n    \"message_type\": \"text\",\n    \"file_url\": null,\n    \"created_at\": \"2026-01-13T20:50:00Z\",\n    \"updated_at\": \"2026-01-13T20:50:00Z\"\n  }\n}\n```\n\n## Real-Time Behavior\n\n1. Message is saved to database\n2. Message is emitted via Socket.IO to conversation participants\n3. If recipient is not in the conversation room, a notification is created\n4. Recipient's unread count is updated in real-time\n\n## Example: Send Image\n\n```json\n{\n  \"content\": \"Here is my X-ray\",\n  \"message_type\": \"image\",\n  \"file_url\": \"https://storage.tangacare.com/images/xray-123.jpg\"\n}\n```\n\n## Notes\n\n- Sender type is automatically determined from user role\n- Conversation's `last_message` and `last_message_at` are updated\n- Maximum content length: 5000 characters"
+                    },
+                    "response": []
+                },
+                {
+                    "name": "Mark Conversation as Read",
+                    "request": {
+                        "method": "PUT",
+                        "header": [
+                            {
+                                "key": "Authorization",
+                                "value": "Bearer {{access_token}}"
+                            }
+                        ],
+                        "url": {
+                            "raw": "{{base_url}}/api/chat/conversations/{{conversation_id}}/mark-read",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "api",
+                                "chat",
+                                "conversations",
+                                "{{conversation_id}}",
+                                "mark-read"
+                            ]
+                        },
+                        "description": "# Mark All Messages as Read\n\nMarks all unread messages in a conversation as read for the current user. This updates the read status and triggers real-time read receipts.\n\n## URL Parameters\n\n| Parameter | Type | Description |\n|-----------|------|-------------|\n| id | integer | Conversation ID |\n\n## Response\n\n**Success (200 OK)**\n```json\n{\n  \"success\": true,\n  \"message\": \"Conversation marked as read\"\n}\n```\n\n## Real-Time Behavior\n\n1. All unread messages are marked as read in database\n2. `message_read` events are emitted via Socket.IO to message senders\n3. User's unread count is updated to 0 for this conversation\n4. Unread count update is broadcast to all user's connected devices\n\n## Notes\n\n- Only marks messages sent by the other user (not your own messages)\n- Creates `message_read` records with current timestamp\n- Idempotent - safe to call multiple times\n- Does not mark messages as read if already read"
+                    },
+                    "response": []
+                }
+            ]
+        },
+        {
+            "name": "Chat - Unread Counts",
+            "description": "Track unread message counts across all conversations.",
+            "item": [
+                {
+                    "name": "Get Unread Counts",
+                    "request": {
+                        "method": "GET",
+                        "header": [
+                            {
+                                "key": "Authorization",
+                                "value": "Bearer {{access_token}}"
+                            }
+                        ],
+                        "url": {
+                            "raw": "{{base_url}}/api/chat/unread-count",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "api",
+                                "chat",
+                                "unread-count"
+                            ]
+                        },
+                        "description": "# Get Unread Message Counts\n\nRetrieves unread message counts for all conversations of the current user. Returns a map of conversation IDs to unread counts.\n\n## Response\n\n**Success (200 OK)**\n```json\n{\n  \"success\": true,\n  \"data\": {\n    \"1\": 2,\n    \"3\": 5,\n    \"7\": 0\n  }\n}\n```\n\n## Response Format\n\nThe response is an object where:\n- **Keys**: Conversation IDs (as strings)\n- **Values**: Number of unread messages (as integers)\n\n## Use Cases\n\n1. **Badge Counts**: Display unread counts on conversation list\n2. **Total Unread**: Sum all values for total unread messages\n3. **Notification Badges**: Update app icon badge count\n\n## Example Usage\n\n```javascript\nconst response = await fetch('/api/chat/unread-count');\nconst { data } = await response.json();\n\n// Get total unread count\nconst totalUnread = Object.values(data).reduce((sum, count) => sum + count, 0);\n\n// Get unread count for specific conversation\nconst conversationUnread = data['1'] || 0;\n```\n\n## Real-Time Updates\n\nThis endpoint provides the current state. For real-time updates, listen to the `unread_count_update` Socket.IO event:\n\n```javascript\nsocket.on('unread_count_update', (counts) => {\n  // counts has same format as this endpoint\n  updateBadges(counts);\n});\n```"
+                    },
+                    "response": []
+                }
+            ]
+        },
+        {
+            "name": "Calls",
+            "description": "Manage WebRTC video and audio calls logic and history.",
+            "item": [
+                {
+                    "name": "Get Call History",
+                    "request": {
+                        "method": "GET",
+                        "header": [
+                            {
+                                "key": "Authorization",
+                                "value": "Bearer {{access_token}}"
+                            }
+                        ],
+                        "url": {
+                            "raw": "{{base_url}}/api/calls?page=1&limit=20",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "api",
+                                "calls"
+                            ],
+                            "query": [
+                                {
+                                    "key": "page",
+                                    "value": "1",
+                                    "description": "Page number"
+                                },
+                                {
+                                    "key": "limit",
+                                    "value": "20",
+                                    "description": "Items per page"
+                                }
+                            ]
+                        },
+                        "description": "Get call history for the authenticated user."
+                    }
+                },
+                {
+                    "name": "Get Call Details",
+                    "request": {
+                        "method": "GET",
+                        "header": [
+                            {
+                                "key": "Authorization",
+                                "value": "Bearer {{access_token}}"
+                            }
+                        ],
+                        "url": {
+                            "raw": "{{base_url}}/api/calls/{{call_id}}",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "api",
+                                "calls",
+                                "{{call_id}}"
+                            ]
+                        },
+                        "description": "Get details of a specific call."
+                    }
+                }
+            ]
+        },
+        {
+            "name": "Notifications",
+            "description": "Manage user notifications. Notifications are created automatically for various events and persist for offline users.",
+            "item": [
+                {
+                    "name": "Get Notifications",
+                    "request": {
+                        "method": "GET",
+                        "header": [
+                            {
+                                "key": "Authorization",
+                                "value": "Bearer {{access_token}}"
+                            }
+                        ],
+                        "url": {
+                            "raw": "{{base_url}}/api/notifications?page=1&limit=20",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "api",
+                                "notifications"
+                            ],
+                            "query": [
+                                {
+                                    "key": "page",
+                                    "value": "1",
+                                    "description": "Page number (default: 1)"
+                                },
+                                {
+                                    "key": "limit",
+                                    "value": "20",
+                                    "description": "Notifications per page (default: 20)"
+                                }
+                            ]
+                        },
+                        "description": "# Get User Notifications\n\nRetrieves paginated notifications for the authenticated user. Notifications are sorted by creation date (newest first).\n\n## Query Parameters\n\n| Parameter | Type | Default | Description |\n|-----------|------|---------|-------------|\n| page | integer | 1 | Page number for pagination |\n| limit | integer | 20 | Number of notifications per page |\n\n## Response\n\n**Success (200 OK)**\n```json\n{\n  \"success\": true,\n  \"data\": {\n    \"notifications\": [\n      {\n        \"id\": 1,\n        \"user_id\": 5,\n        \"type\": \"new_message\",\n        \"title\": \"New Message\",\n        \"message\": \"Dr. John Smith: I can help you with that...\",\n        \"data\": {\n          \"conversationId\": 1,\n          \"messageId\": 15\n        },\n        \"is_read\": false,\n        \"read_at\": null,\n        \"created_at\": \"2026-01-13T20:50:00Z\"\n      },\n      {\n        \"id\": 2,\n        \"user_id\": 5,\n        \"type\": \"appointment_reminder\",\n        \"title\": \"Appointment Reminder\",\n        \"message\": \"Your appointment with Dr. Smith is in 1 hour\",\n        \"data\": {\n          \"appointmentId\": 10\n        },\n        \"is_read\": true,\n        \"read_at\": \"2026-01-13T19:30:00Z\",\n        \"created_at\": \"2026-01-13T19:00:00Z\"\n      }\n    ],\n    \"total\": 15,\n    \"page\": 1,\n    \"totalPages\": 1\n  }\n}\n```\n\n## Notification Types\n\n| Type | Description |\n|------|-------------|\n| new_message | New chat message received |\n| appointment_reminder | Upcoming appointment reminder |\n| appointment_confirmed | Appointment has been confirmed |\n| appointment_cancelled | Appointment has been cancelled |\n| prescription_ready | Prescription is ready |\n| payment_received | Payment has been processed |\n| health_tip | New health tip available |\n\n## Data Field\n\nThe `data` field contains type-specific metadata:\n\n**new_message**:\n```json\n{\n  \"conversationId\": 1,\n  \"messageId\": 15\n}\n```\n\n**appointment_reminder**:\n```json\n{\n  \"appointmentId\": 10,\n  \"appointmentDate\": \"2026-01-13T21:00:00Z\"\n}\n```"
+                    },
+                    "response": []
+                },
+                {
+                    "name": "Get Unread Notification Count",
+                    "request": {
+                        "method": "GET",
+                        "header": [
+                            {
+                                "key": "Authorization",
+                                "value": "Bearer {{access_token}}"
+                            }
+                        ],
+                        "url": {
+                            "raw": "{{base_url}}/api/notifications/unread-count",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "api",
+                                "notifications",
+                                "unread-count"
+                            ]
+                        },
+                        "description": "# Get Unread Notification Count\n\nRetrieves the total number of unread notifications for the current user.\n\n## Response\n\n**Success (200 OK)**\n```json\n{\n  \"success\": true,\n  \"data\": {\n    \"count\": 5\n  }\n}\n```\n\n## Use Cases\n\n1. **Badge Display**: Show unread count on notification bell icon\n2. **App Badge**: Update mobile app icon badge\n3. **Polling**: Periodically check for new notifications\n\n## Real-Time Alternative\n\nFor real-time updates, use Socket.IO:\n\n```javascript\nsocket.on('notification', (notification) => {\n  // New notification received\n  incrementBadgeCount();\n});\n```"
+                    },
+                    "response": []
+                },
+                {
+                    "name": "Mark Notification as Read",
+                    "request": {
+                        "method": "PUT",
+                        "header": [
+                            {
+                                "key": "Authorization",
+                                "value": "Bearer {{access_token}}"
+                            }
+                        ],
+                        "url": {
+                            "raw": "{{base_url}}/api/notifications/{{notification_id}}/read",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "api",
+                                "notifications",
+                                "{{notification_id}}",
+                                "read"
+                            ]
+                        },
+                        "description": "# Mark Notification as Read\n\nMarks a specific notification as read for the current user.\n\n## URL Parameters\n\n| Parameter | Type | Description |\n|-----------|------|-------------|\n| id | integer | Notification ID |\n\n## Response\n\n**Success (200 OK)**\n```json\n{\n  \"success\": true,\n  \"message\": \"Notification marked as read\"\n}\n```\n\n## Behavior\n\n- Sets `is_read` to `true`\n- Sets `read_at` to current timestamp\n- Idempotent - safe to call multiple times\n- Returns error if notification doesn't belong to user\n\n## Privacy\n\nUsers can only mark their own notifications as read."
+                    },
+                    "response": []
+                },
+                {
+                    "name": "Mark All Notifications as Read",
+                    "request": {
+                        "method": "PUT",
+                        "header": [
+                            {
+                                "key": "Authorization",
+                                "value": "Bearer {{access_token}}"
+                            }
+                        ],
+                        "url": {
+                            "raw": "{{base_url}}/api/notifications/read-all",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "api",
+                                "notifications",
+                                "read-all"
+                            ]
+                        },
+                        "description": "# Mark All Notifications as Read\n\nMarks all unread notifications as read for the current user.\n\n## Response\n\n**Success (200 OK)**\n```json\n{\n  \"success\": true,\n  \"message\": \"All notifications marked as read\"\n}\n```\n\n## Behavior\n\n- Updates all notifications where `is_read = false`\n- Sets `is_read` to `true` and `read_at` to current timestamp\n- Only affects notifications belonging to the current user\n- Efficient bulk update operation\n\n## Use Cases\n\n- \"Mark all as read\" button in notification center\n- Clear all notification badges\n- Bulk notification management"
+                    },
+                    "response": []
+                },
+                {
+                    "name": "Delete Notification",
+                    "request": {
+                        "method": "DELETE",
+                        "header": [
+                            {
+                                "key": "Authorization",
+                                "value": "Bearer {{access_token}}"
+                            }
+                        ],
+                        "url": {
+                            "raw": "{{base_url}}/api/notifications/{{notification_id}}",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "api",
+                                "notifications",
+                                "{{notification_id}}"
+                            ]
+                        },
+                        "description": "# Delete Notification\n\nPermanently deletes a notification for the current user.\n\n## URL Parameters\n\n| Parameter | Type | Description |\n|-----------|------|-------------|\n| id | integer | Notification ID |\n\n## Response\n\n**Success (200 OK)**\n```json\n{\n  \"success\": true,\n  \"message\": \"Notification deleted\"\n}\n```\n\n## Behavior\n\n- Permanently removes notification from database\n- Cannot be undone\n- Returns error if notification doesn't belong to user\n\n## Privacy\n\nUsers can only delete their own notifications.\n\n## Use Cases\n\n- Dismiss individual notifications\n- Clean up notification history\n- Remove irrelevant notifications"
+                    },
+                    "response": []
+                }
+            ]
+        },
+        {
+            "name": "Socket.IO Events",
+            "description": "Real-time events via Socket.IO for instant messaging, typing indicators, read receipts, and online status.",
+            "item": [
+                {
+                    "name": "Socket.IO Documentation",
+                    "request": {
+                        "method": "GET",
+                        "header": [],
+                        "url": {
+                            "raw": "{{base_url}}/socket.io/",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "socket.io",
+                                ""
+                            ]
+                        },
+                        "description": "# Socket.IO Real-Time Events\n\nConnect to Socket.IO for real-time chat features.\n\n## Connection\n\n```javascript\nimport { io } from 'socket.io-client';\n\nconst socket = io('http://localhost:3000', {\n  auth: {\n    token: 'your_jwt_token_here'\n  }\n});\n\nsocket.on('connect', () => {\n  console.log('Connected to Socket.IO');\n});\n\nsocket.on('error', (error) => {\n  console.error('Socket error:', error);\n});\n```\n\n## Events to Emit (Client → Server)\n\n### join_conversation\nJoin a conversation room to receive real-time messages.\n\n```javascript\nsocket.emit('join_conversation', {\n  conversationId: 1\n});\n\nsocket.on('joined_conversation', (data) => {\n  console.log('Joined conversation:', data.conversationId);\n});\n```\n\n### leave_conversation\nLeave a conversation room.\n\n```javascript\nsocket.emit('leave_conversation', {\n  conversationId: 1\n});\n```\n\n### send_message\nSend a message in real-time.\n\n```javascript\nsocket.emit('send_message', {\n  conversationId: 1,\n  content: 'Hello!',\n  messageType: 'text' // optional: 'text', 'image', 'file'\n});\n```\n\n### typing\nBroadcast typing indicator.\n\n```javascript\n// Start typing\nsocket.emit('typing', {\n  conversationId: 1,\n  isTyping: true\n});\n\n// Stop typing\nsocket.emit('typing', {\n  conversationId: 1,\n  isTyping: false\n});\n```\n\n### mark_read\nMark a message as read.\n\n```javascript\nsocket.emit('mark_read', {\n  messageId: 123,\n  conversationId: 1\n});\n```\n\n### get_online_status\nCheck online status of users.\n\n```javascript\nsocket.emit('get_online_status', {\n  userIds: [3, 5, 7]\n});\n\nsocket.on('online_status', (statuses) => {\n  console.log(statuses);\n  // { 3: { isOnline: true, lastSeen: '...' }, ... }\n});\n```\n\n## Events to Listen (Server → Client)\n\n### new_message\nReceive new messages in real-time.\n\n```javascript\nsocket.on('new_message', (message) => {\n  console.log('New message:', message);\n  // Display message in UI\n});\n```\n\n### message_read\nReceive read receipts.\n\n```javascript\nsocket.on('message_read', (data) => {\n  console.log('Message read:', data);\n  // { messageId: 123, conversationId: 1, readBy: 5, readAt: '...' }\n  // Update UI to show read status\n});\n```\n\n### typing_indicator\nReceive typing status.\n\n```javascript\nsocket.on('typing_indicator', (data) => {\n  console.log('User typing:', data);\n  // { conversationId: 1, userId: 3, isTyping: true }\n  // Show \"User is typing...\" indicator\n});\n```\n\n### notification\nReceive real-time notifications.\n\n```javascript\nsocket.on('notification', (notification) => {\n  console.log('New notification:', notification);\n  // Display notification toast/banner\n});\n```\n\n### unread_count_update\nReceive updated unread counts.\n\n```javascript\nsocket.on('unread_count_update', (counts) => {\n  console.log('Unread counts updated:', counts);\n  // Update badge counts in UI\n});\n```\n\n### user_status_change\nReceive online/offline status changes.\n\n```javascript\nsocket.on('user_status_change', (data) => {\n  console.log('User status changed:', data);\n  // { userId: 3, isOnline: true, timestamp: '...' }\n  // Update online/offline indicator\n});\n```\n\n## Authentication\n\n- JWT token is required in the `auth` object during connection\n- Connection will be rejected if token is invalid or missing\n- Token is verified on every connection attempt\n\n## Error Handling\n\n```javascript\nsocket.on('error', (error) => {\n  console.error('Socket error:', error.message);\n  // Handle errors (e.g., unauthorized access, invalid data)\n});\n```\n\n## Reconnection\n\nSocket.IO handles reconnection automatically:\n\n```javascript\nsocket.on('disconnect', (reason) => {\n  console.log('Disconnected:', reason);\n});\n\nsocket.on('reconnect', (attemptNumber) => {\n  console.log('Reconnected after', attemptNumber, 'attempts');\n  // Rejoin conversations\n});\n```\n\n## Best Practices\n\n1. **Join conversations on mount**: Join conversation rooms when user opens a chat\n2. **Leave on unmount**: Leave rooms when user closes chat to save resources\n3. **Debounce typing**: Debounce typing events to avoid excessive emissions\n4. **Handle offline**: Store messages locally if offline, sync when reconnected\n5. **Clean up listeners**: Remove event listeners when component unmounts"
+                    },
+                    "response": []
+                }
+            ]
+        }
+    ]
+}
