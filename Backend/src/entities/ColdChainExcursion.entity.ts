@@ -32,7 +32,7 @@ export class ColdChainExcursion {
     facility_id: number;
 
     @Column({ type: 'int', nullable: true })
-    organization_id: number;
+    organization_id: number | null;
 
     @Column({ type: 'int' })
     storage_location_id: number;
@@ -114,5 +114,5 @@ export class ColdChainExcursion {
 
     @ManyToOne(() => Organization, { nullable: true, onDelete: 'SET NULL' })
     @JoinColumn({ name: 'organization_id' })
-    organization: Organization;
+    organization: Organization | null;
 }

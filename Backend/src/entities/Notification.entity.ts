@@ -1,5 +1,6 @@
 import { Entity, PrimaryGeneratedColumn, Column, CreateDateColumn, ManyToOne, JoinColumn, Index } from 'typeorm';
 import { User } from './User.entity';
+import { Alert } from './Alert.entity';
 
 export enum NotificationType {
     NEW_MESSAGE = 'new_message',
@@ -23,12 +24,16 @@ export enum NotificationType {
 @Entity('notifications')
 @Index(['user_id', 'is_read'])
 @Index(['user_id', 'created_at'])
+@Index(['alert_id', 'created_at'])
 export class Notification {
     @PrimaryGeneratedColumn()
     id: number;
 
     @Column({ type: 'int' })
     user_id: number;
+
+    @Column({ type: 'int', nullable: true })
+    alert_id: number | null;
 
     @Column({
         type: 'enum',
@@ -57,4 +62,8 @@ export class Notification {
     @ManyToOne(() => User, { onDelete: 'CASCADE' })
     @JoinColumn({ name: 'user_id' })
     user: User;
+
+    @ManyToOne(() => Alert, { nullable: true, onDelete: 'SET NULL' })
+    @JoinColumn({ name: 'alert_id' })
+    alert: Alert | null;
 }

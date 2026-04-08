@@ -24,16 +24,22 @@ describe('AlertController Wave1 Compatibility', () => {
             user: { userId: 1, facilityId: 5, organizationId: 3 },
         };
 
-        jest.spyOn((controller as any).alertService, 'getAlerts').mockResolvedValue([
-            {
-                id: 1,
-                facility_id: 5,
-                alert_type: 'low_stock',
-                status: 'active',
-                title: 'Low stock',
-                message: 'Paracetamol low',
-            },
-        ]);
+        jest.spyOn((controller as any).alertService, 'getAlerts').mockResolvedValue({
+            data: [
+                {
+                    id: 1,
+                    facility_id: 5,
+                    alert_type: 'low_stock',
+                    status: 'active',
+                    title: 'Low stock',
+                    message: 'Paracetamol low',
+                },
+            ],
+            total: 1,
+            page: 1,
+            limit: 50,
+            totalPages: 1,
+        });
 
         await controller.getAlerts(req, res as Response, next);
 
@@ -41,5 +47,6 @@ describe('AlertController Wave1 Compatibility', () => {
         const payload = (res.json as jest.Mock).mock.calls[0][0];
         expect(payload.data[0].alert_type).toBe('low_stock');
         expect(payload.data[0].type).toBe('low_stock');
+        expect(payload.meta.total).toBe(1);
     });
 });

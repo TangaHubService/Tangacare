@@ -17,15 +17,27 @@ export class NotificationService {
         message: string,
         data?: Record<string, any>,
         manager?: EntityManager,
+        options?: {
+            alertId?: number | null;
+        },
     ): Promise<Notification> {
         const repo = manager ? manager.getRepository(Notification) : this.notificationRepository;
+        const alertId = options?.alertId ?? null;
+        const payloadData =
+            alertId && !data?.alertId
+                ? {
+                      ...(data || {}),
+                      alertId,
+                  }
+                : data;
 
         const notification = repo.create({
             user_id: userId,
+            alert_id: alertId,
             type,
             title,
             message,
-            data,
+            data: payloadData,
         });
 
         const savedNotification = await repo.save(notification);

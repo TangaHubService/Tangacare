@@ -20,6 +20,9 @@ export enum AlertType {
     EXPIRED = 'expired',
     CONTROLLED_DRUG_THRESHOLD = 'controlled_drug_threshold',
     REORDER_SUGGESTION = 'reorder_suggestion',
+    BATCH_RECALL = 'batch_recall',
+    STOCK_VARIANCE = 'stock_variance',
+    COLD_CHAIN_EXCURSION = 'cold_chain_excursion',
 }
 
 export enum AlertStatus {
@@ -31,6 +34,7 @@ export enum AlertStatus {
 @Entity('alerts')
 @Index(['facility_id', 'status', 'alert_type'])
 @Index(['organization_id'])
+@Index(['facility_id', 'alert_type', 'reference_type', 'reference_id', 'status'])
 export class Alert {
     @PrimaryGeneratedColumn()
     id: number;
@@ -39,7 +43,7 @@ export class Alert {
     facility_id: number;
 
     @Column({ type: 'int', nullable: true })
-    organization_id: number;
+    organization_id: number | null;
 
     @Column({
         type: 'enum',
@@ -55,10 +59,16 @@ export class Alert {
     status: AlertStatus;
 
     @Column({ type: 'int', nullable: true })
-    medicine_id: number;
+    medicine_id: number | null;
 
     @Column({ type: 'int', nullable: true })
-    batch_id: number;
+    batch_id: number | null;
+
+    @Column({ type: 'varchar', length: 80, nullable: true })
+    reference_type: string | null;
+
+    @Column({ type: 'int', nullable: true })
+    reference_id: number | null;
 
     @Column({ type: 'varchar', length: 255 })
     title: string;
@@ -67,13 +77,13 @@ export class Alert {
     message: string;
 
     @Column({ type: 'int', nullable: true })
-    current_value: number;
+    current_value: number | null;
 
     @Column({ type: 'int', nullable: true })
-    threshold_value: number;
+    threshold_value: number | null;
 
     @Column({ type: 'timestamp with time zone', nullable: true })
-    last_notified_at: Date;
+    last_notified_at: Date | null;
 
     @Column({
         type: 'varchar',
@@ -84,22 +94,25 @@ export class Alert {
     severity: string;
 
     @Column({ type: 'timestamp with time zone', nullable: true })
-    acknowledged_at: Date;
+    acknowledged_at: Date | null;
 
     @Column({ type: 'int', nullable: true })
-    acknowledged_by_id: number;
+    acknowledged_by_id: number | null;
 
     @Column({ type: 'timestamp with time zone', nullable: true })
-    resolved_at: Date;
+    resolved_at: Date | null;
 
     @Column({ type: 'int', nullable: true })
-    resolved_by_id: number;
+    resolved_by_id: number | null;
 
     @Column({ type: 'varchar', length: 100, nullable: true })
-    action_taken: string;
+    action_taken: string | null;
 
     @Column({ type: 'text', nullable: true })
-    action_reason: string;
+    action_reason: string | null;
+
+    @Column({ type: 'jsonb', nullable: true })
+    context_data: Record<string, any> | null;
 
     @CreateDateColumn({ type: 'timestamp with time zone' })
     created_at: Date;
@@ -113,13 +126,13 @@ export class Alert {
 
     @ManyToOne(() => Medicine, { nullable: true, onDelete: 'CASCADE' })
     @JoinColumn({ name: 'medicine_id' })
-    medicine: Medicine;
+    medicine: Medicine | null;
 
     @ManyToOne(() => Batch, { nullable: true, onDelete: 'CASCADE' })
     @JoinColumn({ name: 'batch_id' })
-    batch: Batch;
+    batch: Batch | null;
 
     @ManyToOne(() => Organization, { nullable: true, onDelete: 'SET NULL' })
     @JoinColumn({ name: 'organization_id' })
-    organization: Organization;
+    organization: Organization | null;
 }

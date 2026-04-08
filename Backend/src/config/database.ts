@@ -15,6 +15,8 @@ import { Message } from '../entities/Message.entity';
 import { MessageRead } from '../entities/MessageRead.entity';
 import { Call } from '../entities/Call.entity';
 import { Notification } from '../entities/Notification.entity';
+import { AlertEvent } from '../entities/AlertEvent.entity';
+import { AlertDeliveryLog } from '../entities/AlertDeliveryLog.entity';
 
 import { Organization } from '../entities/Organization.entity';
 import { Facility } from '../entities/Facility.entity';
@@ -93,6 +95,8 @@ export const AppDataSource = new DataSource({
         MessageRead,
         Call,
         Notification,
+        AlertEvent,
+        AlertDeliveryLog,
 
         Organization,
         Facility,

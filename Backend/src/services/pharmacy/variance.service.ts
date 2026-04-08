@@ -7,6 +7,8 @@ import { AuditService } from './audit.service';
 import { AuditAction, AuditEntityType } from '../../entities/AuditLog.entity';
 import { StockMovementType, AdjustmentReason } from '../../entities/StockMovement.entity';
 import { InventoryNotificationService } from './inventory-notification.service';
+import { AlertType } from '../../entities/Alert.entity';
+import { AlertService } from './alert.service';
 
 export interface CreateVarianceDto {
     facility_id: number;
@@ -39,6 +41,7 @@ export class VarianceService {
     private stockService: StockService;
     private auditService: AuditService;
     private inventoryNotificationService: InventoryNotificationService;
+    private alertService: AlertService;
 
     constructor() {
         this.varianceRepository = AppDataSource.getRepository(StockVariance);
@@ -46,6 +49,22 @@ export class VarianceService {
         this.stockService = new StockService();
         this.auditService = new AuditService();
         this.inventoryNotificationService = new InventoryNotificationService();
+        this.alertService = new AlertService();
+    }
+
+    private getVarianceSeverity(varianceQuantity: number, varianceValue: number): 'info' | 'warning' | 'critical' {
+        const absoluteQuantity = Math.abs(Number(varianceQuantity || 0));
+        const absoluteValue = Math.abs(Number(varianceValue || 0));
+
+        if (absoluteQuantity >= 50 || absoluteValue >= 50000) {
+            return 'critical';
+        }
+
+        if (absoluteQuantity >= 10 || absoluteValue >= 10000) {
+            return 'warning';
+        }
+
+        return 'info';
     }
 
     async recordVariance(data: CreateVarianceDto): Promise<StockVariance> {
@@ -116,7 +135,47 @@ export class VarianceService {
         });
 
         if (varianceWithRelations) {
-            this.inventoryNotificationService.notifyVariance(varianceWithRelations).catch((err) => {
+            const severity = this.getVarianceSeverity(
+                varianceWithRelations.variance_quantity,
+                Number(varianceWithRelations.variance_value || 0),
+            );
+
+            let alertId: number | undefined;
+            try {
+                const alert = await this.alertService.upsertOperationalAlert({
+                    facilityId: varianceWithRelations.facility_id,
+                    organizationId: varianceWithRelations.organization_id || data.organization_id,
+                    type: AlertType.STOCK_VARIANCE,
+                    referenceType: 'stock_variance',
+                    referenceId: varianceWithRelations.id,
+                    medicineId: varianceWithRelations.medicine_id,
+                    batchId: varianceWithRelations.batch_id,
+                    title: `Stock Variance #${varianceWithRelations.id}`,
+                    message: `${varianceWithRelations.variance_quantity > 0 ? 'Surplus' : 'Shortage'} of ${Math.abs(varianceWithRelations.variance_quantity)} units detected for ${varianceWithRelations.medicine?.name || `Medicine #${varianceWithRelations.medicine_id}`}.`,
+                    severity,
+                    currentValue: Math.abs(varianceWithRelations.variance_quantity),
+                    thresholdValue: 0,
+                    contextData: {
+                        status: varianceWithRelations.status,
+                        variance_type: varianceWithRelations.variance_type,
+                        variance_quantity: varianceWithRelations.variance_quantity,
+                        variance_value: varianceWithRelations.variance_value,
+                        counted_at: varianceWithRelations.counted_at,
+                    },
+                });
+                alertId = alert.id;
+            } catch (err) {
+                console.error('Failed to create variance alert:', err);
+            }
+
+            this.inventoryNotificationService.notifyVariance(varianceWithRelations, alertId).then(async () => {
+                if (alertId) {
+                    await this.alertService.markAlertNotified(alertId, {
+                        source: 'variance_notification',
+                        varianceId: varianceWithRelations.id,
+                    });
+                }
+            }).catch((err) => {
                 console.error('Failed to send variance notification:', err);
             });
         }
@@ -201,6 +260,24 @@ export class VarianceService {
             new_values: { status: VarianceStatus.APPROVED, adjusted_stock: adjustStock },
         });
 
+        try {
+            await this.alertService.resolveAlertByReference({
+                facilityId: variance.facility_id,
+                organizationId,
+                type: AlertType.STOCK_VARIANCE,
+                referenceType: 'stock_variance',
+                referenceId: variance.id,
+                resolvedById: approvedById,
+                actionTaken: adjustStock ? 'Adjusted Count' : 'Approved Variance',
+                actionReason: adjustStock
+                    ? 'Variance approved and stock updated to match the approved physical count.'
+                    : 'Variance approved without an automatic stock adjustment.',
+                note: 'Variance workflow completed with approval',
+            });
+        } catch (error) {
+            console.error('Failed to resolve variance alert after approval:', error);
+        }
+
         return updated;
     }
 
@@ -241,6 +318,23 @@ export class VarianceService {
             old_values: { status: VarianceStatus.PENDING },
             new_values: { status: VarianceStatus.REJECTED },
         });
+
+        try {
+            await this.alertService.resolveAlertByReference({
+                facilityId: variance.facility_id,
+                organizationId,
+                type: AlertType.STOCK_VARIANCE,
+                referenceType: 'stock_variance',
+                referenceId: variance.id,
+                resolvedById: rejectedById,
+                actionTaken: 'Rejected Variance',
+                actionReason:
+                    reason?.trim() || 'Variance was rejected after review and does not require inventory adjustment.',
+                note: 'Variance workflow completed with rejection',
+            });
+        } catch (error) {
+            console.error('Failed to resolve variance alert after rejection:', error);
+        }
 
         return updated;
     }

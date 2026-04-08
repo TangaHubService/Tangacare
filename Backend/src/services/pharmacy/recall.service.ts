@@ -5,6 +5,8 @@ import { SaleStatus } from '../../entities/Sale.entity';
 import { SaleItem } from '../../entities/Sale.entity';
 import { Stock } from '../../entities/Stock.entity';
 import { InventoryNotificationService } from './inventory-notification.service';
+import { AlertType } from '../../entities/Alert.entity';
+import { AlertService } from './alert.service';
 
 export interface InitiateRecallDto {
     facility_id: number;
@@ -34,12 +36,14 @@ export class RecallService {
     private saleItemRepository: Repository<SaleItem>;
     private stockRepository: Repository<Stock>;
     private inventoryNotificationService: InventoryNotificationService;
+    private alertService: AlertService;
 
     constructor() {
         this.recallRepository = AppDataSource.getRepository(BatchRecall);
         this.saleItemRepository = AppDataSource.getRepository(SaleItem);
         this.stockRepository = AppDataSource.getRepository(Stock);
         this.inventoryNotificationService = new InventoryNotificationService();
+        this.alertService = new AlertService();
     }
 
     async initiateRecall(data: InitiateRecallDto): Promise<RecallSummary> {
@@ -111,7 +115,44 @@ export class RecallService {
         });
 
         if (recallWithRelations) {
-            this.inventoryNotificationService.notifyRecall(recallWithRelations, affectedSalesCount).catch((err) => {
+            let alertId: number | undefined;
+            try {
+                const alert = await this.alertService.upsertOperationalAlert({
+                    facilityId: recallWithRelations.facility_id,
+                    organizationId: recallWithRelations.organization_id || data.organization_id,
+                    type: AlertType.BATCH_RECALL,
+                    referenceType: 'batch_recall',
+                    referenceId: recallWithRelations.id,
+                    medicineId: recallWithRelations.medicine_id,
+                    batchId: recallWithRelations.batch_id,
+                    title: `Batch Recall: ${recallWithRelations.recall_number}`,
+                    message: `Recall initiated for ${recallWithRelations.medicine?.name || `Medicine #${recallWithRelations.medicine_id}`}, batch ${recallWithRelations.batch?.batch_number || recallWithRelations.batch_id}. ${affectedSalesCount} sales impacted.`,
+                    severity: 'critical',
+                    currentValue: recallWithRelations.remaining_stock,
+                    thresholdValue: affectedSalesCount,
+                    contextData: {
+                        status: recallWithRelations.status,
+                        reason: recallWithRelations.reason,
+                        recall_number: recallWithRelations.recall_number,
+                        affected_sales_count: recallWithRelations.affected_sales_count,
+                        affected_quantity: recallWithRelations.affected_quantity,
+                        recovered_quantity: recallWithRelations.recovered_quantity,
+                        remaining_stock: recallWithRelations.remaining_stock,
+                    },
+                });
+                alertId = alert.id;
+            } catch (err) {
+                console.error('Failed to create recall alert:', err);
+            }
+
+            this.inventoryNotificationService.notifyRecall(recallWithRelations, affectedSalesCount, alertId).then(async () => {
+                if (alertId) {
+                    await this.alertService.markAlertNotified(alertId, {
+                        source: 'recall_notification',
+                        recallId: recallWithRelations.id,
+                    });
+                }
+            }).catch((err) => {
                 console.error('Failed to send recall notification:', err);
             });
         }
@@ -143,6 +184,7 @@ export class RecallService {
     ): Promise<BatchRecall> {
         const recall = await this.recallRepository.findOne({
             where: { id: recallId, organization_id: organizationId },
+            relations: ['medicine', 'batch'],
         });
 
         if (!recall) {
@@ -181,7 +223,56 @@ export class RecallService {
                 .execute();
         }
 
-        return await this.recallRepository.save(recall);
+        const saved = await this.recallRepository.save(recall);
+
+        try {
+            if (status === RecallStatus.COMPLETED || status === RecallStatus.CANCELLED) {
+                await this.alertService.resolveAlertByReference({
+                    facilityId: saved.facility_id,
+                    organizationId,
+                    type: AlertType.BATCH_RECALL,
+                    referenceType: 'batch_recall',
+                    referenceId: saved.id,
+                    resolvedById: userId,
+                    actionTaken:
+                        actionTaken ||
+                        (status === RecallStatus.COMPLETED ? 'Recovered' : 'False Alarm'),
+                    actionReason:
+                        actionTaken ||
+                        (status === RecallStatus.COMPLETED
+                            ? 'Recall process completed and the affected batch workflow has been closed.'
+                            : 'Recall was cancelled after review and no further containment action is required.'),
+                    note: `Recall ${saved.recall_number} marked as ${status}`,
+                });
+            } else {
+                await this.alertService.upsertOperationalAlert({
+                    facilityId: saved.facility_id,
+                    organizationId,
+                    type: AlertType.BATCH_RECALL,
+                    referenceType: 'batch_recall',
+                    referenceId: saved.id,
+                    medicineId: saved.medicine_id,
+                    batchId: saved.batch_id,
+                    title: `Batch Recall: ${saved.recall_number}`,
+                    message: `Recall ${saved.recall_number} for ${saved.medicine?.name || `Medicine #${saved.medicine_id}`} remains active with status ${saved.status}.`,
+                    severity: 'critical',
+                    currentValue: saved.remaining_stock,
+                    thresholdValue: saved.affected_sales_count,
+                    contextData: {
+                        status: saved.status,
+                        reason: saved.reason,
+                        recall_number: saved.recall_number,
+                        action_taken: saved.action_taken,
+                        recovered_quantity: saved.recovered_quantity,
+                        remaining_stock: saved.remaining_stock,
+                    },
+                });
+            }
+        } catch (error) {
+            console.error('Failed to update recall alert:', error);
+        }
+
+        return saved;
     }
 
     async getRecallById(recallId: number, organizationId: number, facilityId: number): Promise<RecallSummary> {

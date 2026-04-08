@@ -1,15 +1,26 @@
 import { Server, Socket } from 'socket.io';
+import { In } from 'typeorm';
 import { ChatService } from '../services/chat.service';
 import { NotificationService } from '../services/notification.service';
 import { AuthenticatedSocket } from './socket.middleware';
 import { logger } from '../middleware/logger.middleware';
 import { SenderType, MessageType } from '../entities/Message.entity';
-import { UserRole } from '../entities/User.entity';
+import { User, UserRole } from '../entities/User.entity';
 import { NotificationType } from '../entities/Notification.entity';
 import { CallService } from '../services/call.service';
 import { CallType } from '../entities/Call.entity';
 import { eventBus, EventTypes } from '../utils/eventBus';
 import { Notification } from '../entities/Notification.entity';
+import { AppDataSource } from '../config/database';
+
+interface AlertRealtimePayload {
+    id: number;
+    facility_id?: number | null;
+    organization_id?: number | null;
+    type?: string;
+    status?: string;
+    severity?: string;
+}
 
 export class SocketGateway {
     private io: Server;
@@ -17,6 +28,7 @@ export class SocketGateway {
     private notificationService: NotificationService;
     private callService: CallService;
     private onlineUsers: Map<number, string[]>;
+    private userRepository = AppDataSource.getRepository(User);
 
     constructor(io: Server) {
         this.io = io;
@@ -81,6 +93,18 @@ export class SocketGateway {
                 });
             });
         });
+
+        eventBus.on(EventTypes.ALERT_CREATED, (payload: AlertRealtimePayload) => {
+            void this.emitAlertEventToRecipients('alert:new', payload);
+        });
+
+        eventBus.on(EventTypes.ALERT_UPDATED, (payload: AlertRealtimePayload) => {
+            void this.emitAlertEventToRecipients('alert:updated', payload);
+        });
+
+        eventBus.on(EventTypes.ALERT_RESOLVED, (payload: AlertRealtimePayload) => {
+            void this.emitAlertEventToRecipients('alert:resolved', payload);
+        });
     }
 
     private addOnlineUser(userId: number, socketId: string): void {
@@ -110,6 +134,63 @@ export class SocketGateway {
             isOnline,
             timestamp: new Date(),
         });
+    }
+
+    private async emitAlertEventToRecipients(
+        socketEvent: 'alert:new' | 'alert:updated' | 'alert:resolved',
+        payload: AlertRealtimePayload,
+    ): Promise<void> {
+        try {
+            const orgScopedRoles = [UserRole.SUPER_ADMIN, UserRole.OWNER, UserRole.ADMIN];
+            const facilityScopedRoles = [
+                UserRole.FACILITY_ADMIN,
+                UserRole.STORE_MANAGER,
+                UserRole.PHARMACIST,
+                UserRole.AUDITOR,
+                UserRole.STORE_KEEPER,
+            ];
+
+            const where: Array<Record<string, unknown>> = [];
+
+            if (payload.organization_id) {
+                where.push({
+                    organization_id: payload.organization_id,
+                    role: In(orgScopedRoles),
+                    is_active: true,
+                });
+            }
+
+            if (payload.facility_id) {
+                const facilityScopedWhere: Record<string, unknown> = {
+                    organization_id: payload.organization_id ?? undefined,
+                    facility_id: payload.facility_id,
+                    role: In(facilityScopedRoles),
+                    is_active: true,
+                };
+
+                if (!payload.organization_id) {
+                    delete facilityScopedWhere.organization_id;
+                }
+
+                where.push(facilityScopedWhere);
+            }
+
+            if (where.length === 0) {
+                return;
+            }
+
+            const recipients = await this.userRepository.find({ where: where as any });
+            const recipientIds = Array.from(new Set(recipients.map((user) => user.id)));
+
+            recipientIds.forEach((userId) => {
+                const userSockets = this.onlineUsers.get(userId) || [];
+                userSockets.forEach((socketId) => {
+                    this.io.to(socketId).emit(socketEvent, payload);
+                });
+            });
+        } catch (error) {
+            logger.error(`Failed to emit ${socketEvent}:`, error);
+        }
     }
 
     private handleJoinConversation(socket: AuthenticatedSocket): void {

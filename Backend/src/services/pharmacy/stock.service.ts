@@ -135,7 +135,7 @@ export class StockService {
 
         // Real-time alert check
         this.alertService
-            .checkLowStock(facilityId, medicineId)
+            .checkLowStock(facilityId, organizationId, medicineId)
             .catch((err) => console.error('Failed to trigger real-time alert check:', err));
 
         // Update WAC if enabled and unitCost is provided
@@ -459,7 +459,7 @@ export class StockService {
 
         // Real-time alert check (fire-and-forget, non-blocking)
         this.alertService
-            .checkLowStock(savedStock.facility_id, savedStock.medicine_id)
+            .checkLowStock(savedStock.facility_id, savedStock.organization_id, savedStock.medicine_id)
             .catch((err) => console.error('Failed to trigger real-time alert check:', err));
 
         return savedStock;
@@ -518,7 +518,7 @@ export class StockService {
 
         // Real-time alert check
         this.alertService
-            .checkLowStock(savedStock.facility_id, savedStock.medicine_id)
+            .checkLowStock(savedStock.facility_id, savedStock.organization_id, savedStock.medicine_id)
             .catch((err) => console.error('Failed to trigger real-time alert check:', err));
 
         return savedStock;
@@ -595,7 +595,7 @@ export class StockService {
 
         // Real-time alert check
         this.alertService
-            .checkLowStock(facilityId, medicineId)
+            .checkLowStock(facilityId, organizationId, medicineId)
             .catch((err) => console.error('Failed to trigger real-time alert check:', err));
     }
 

@@ -4,6 +4,9 @@ import { AppError } from '../../middleware/error.middleware';
 import { StorageLocation, TemperatureType } from '../../entities/StorageLocation.entity';
 import { ColdChainTelemetry, ColdChainTelemetrySource } from '../../entities/ColdChainTelemetry.entity';
 import { ColdChainExcursion, ColdChainExcursionStatus } from '../../entities/ColdChainExcursion.entity';
+import { AlertType } from '../../entities/Alert.entity';
+import { AlertService } from './alert.service';
+import { InventoryNotificationService } from './inventory-notification.service';
 
 export interface LogTelemetryInput {
     temperature_c: number;
@@ -23,11 +26,15 @@ export class ColdChainService {
     private locationRepository: Repository<StorageLocation>;
     private telemetryRepository: Repository<ColdChainTelemetry>;
     private excursionRepository: Repository<ColdChainExcursion>;
+    private alertService: AlertService;
+    private inventoryNotificationService: InventoryNotificationService;
 
     constructor() {
         this.locationRepository = AppDataSource.getRepository(StorageLocation);
         this.telemetryRepository = AppDataSource.getRepository(ColdChainTelemetry);
         this.excursionRepository = AppDataSource.getRepository(ColdChainExcursion);
+        this.alertService = new AlertService();
+        this.inventoryNotificationService = new InventoryNotificationService();
     }
 
     private getTemperatureRange(type: TemperatureType): TemperatureRange {
@@ -62,6 +69,16 @@ export class ColdChainService {
             return value;
         }
         return Number(value || 0);
+    }
+
+    private shouldNotify(lastNotifiedAt?: Date | null): boolean {
+        if (!lastNotifiedAt) {
+            return true;
+        }
+
+        const oneDayAgo = new Date();
+        oneDayAgo.setDate(oneDayAgo.getDate() - 1);
+        return new Date(lastNotifiedAt) < oneDayAgo;
     }
 
     private formatTelemetry(log: ColdChainTelemetry) {
@@ -153,11 +170,13 @@ export class ColdChainService {
             },
             relations: ['location'],
         });
+        const hadOpenExcursion = Boolean(excursion);
 
         if (!withinRange) {
             if (!excursion) {
                 excursion = this.excursionRepository.create({
                     facility_id: facilityId,
+                    organization_id: location.organization_id ?? null,
                     storage_location_id: location.id,
                     status: ColdChainExcursionStatus.OPEN,
                     started_at: recordedAt,
@@ -174,6 +193,7 @@ export class ColdChainService {
             } else {
                 excursion.last_observed_at = recordedAt;
                 excursion.last_temperature_c = input.temperature_c;
+                excursion.organization_id = excursion.organization_id ?? location.organization_id ?? null;
                 excursion.highest_temperature_c = Math.max(
                     this.toNumber(excursion.highest_temperature_c),
                     input.temperature_c,
@@ -202,6 +222,57 @@ export class ColdChainService {
                 where: { id: excursion.id },
                 relations: ['location'],
             });
+        }
+
+        if (excursion) {
+            const organizationId = Number(excursion.organization_id || location.organization_id || 0);
+            if (organizationId > 0) {
+                try {
+                    const alert = await this.alertService.upsertOperationalAlert({
+                        facilityId,
+                        organizationId,
+                        type: AlertType.COLD_CHAIN_EXCURSION,
+                        referenceType: 'cold_chain_excursion',
+                        referenceId: excursion.id,
+                        title: withinRange
+                            ? `Cold Chain Recovery Pending Review: ${location.name}`
+                            : `Cold Chain Excursion: ${location.name}`,
+                        message: withinRange
+                            ? `${location.name} returned to the expected temperature range, but the excursion still requires review and disposition.`
+                            : `${location.name} recorded ${input.temperature_c}C outside the allowed range (${range.label}).`,
+                        severity: withinRange ? 'warning' : 'critical',
+                        currentValue: Math.round(input.temperature_c),
+                        thresholdValue: Math.round(range.max),
+                        contextData: {
+                            excursion_status: excursion.status,
+                            location_name: location.name,
+                            location_code: location.code,
+                            observed_temperature_c: input.temperature_c,
+                            expected_min_c: range.min,
+                            expected_max_c: range.max,
+                            recovered_at: excursion.recovered_at,
+                            last_observed_at: excursion.last_observed_at,
+                        },
+                    });
+
+                    if (!withinRange && (!hadOpenExcursion || this.shouldNotify(alert.last_notified_at))) {
+                        await this.inventoryNotificationService.notifyColdChainExcursion(
+                            facilityId,
+                            location.name,
+                            input.temperature_c,
+                            range.min,
+                            range.max,
+                            alert.id,
+                        );
+                        await this.alertService.markAlertNotified(alert.id, {
+                            source: 'cold_chain_notification',
+                            excursionId: excursion.id,
+                        });
+                    }
+                } catch (error) {
+                    console.error('Failed to update cold-chain alert:', error);
+                }
+            }
         }
 
         return {
@@ -284,6 +355,22 @@ export class ColdChainService {
         }
 
         const saved = await this.excursionRepository.save(excursion);
+        const organizationId = Number(saved.organization_id || excursion.location?.organization_id || 0);
+        if (organizationId > 0) {
+            try {
+                await this.alertService.acknowledgeAlertByReference({
+                    facilityId,
+                    organizationId,
+                    type: AlertType.COLD_CHAIN_EXCURSION,
+                    referenceType: 'cold_chain_excursion',
+                    referenceId: saved.id,
+                    userId: userId || null,
+                    note: notes || 'Cold-chain excursion acknowledged',
+                });
+            } catch (error) {
+                console.error('Failed to acknowledge cold-chain alert:', error);
+            }
+        }
         return this.formatExcursion(saved);
     }
 
@@ -323,6 +410,26 @@ export class ColdChainService {
         }
 
         const saved = await this.excursionRepository.save(excursion);
+        const organizationId = Number(saved.organization_id || excursion.location?.organization_id || 0);
+        if (organizationId > 0) {
+            try {
+                await this.alertService.resolveAlertByReference({
+                    facilityId,
+                    organizationId,
+                    type: AlertType.COLD_CHAIN_EXCURSION,
+                    referenceType: 'cold_chain_excursion',
+                    referenceId: saved.id,
+                    resolvedById: userId || null,
+                    actionTaken,
+                    actionReason:
+                        notes ||
+                        'Cold-chain excursion investigated and formally resolved with the recorded disposition.',
+                    note: 'Cold-chain excursion resolved',
+                });
+            } catch (error) {
+                console.error('Failed to resolve cold-chain alert:', error);
+            }
+        }
         return this.formatExcursion(saved);
     }
 
