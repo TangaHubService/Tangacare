@@ -379,9 +379,7 @@ export const DashboardOwner: React.FC<DashboardOwnerProps> = ({ facilityId }) =>
                             icon={<Clock size={15} />}
                             gradient="from-[#EF4444] to-[#DC2626]"
                             actionLabel="View Details"
-                            onClick={() =>
-                                navigate({ to: '/app/analytics/recall' as any, search: {} as any })
-                            }
+                            onClick={() => navigate({ to: '/app/recalls' as any, search: {} as any })}
                         />
                     </>
                 )}

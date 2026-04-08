@@ -189,6 +189,13 @@ const dailyChecklist = [
     'Export required daily management reports.',
 ];
 
+const tableOfContents = [
+    { id: 'quick-start', title: 'Daily Quick Start' },
+    ...sections.map((section) => ({ id: section.id, title: section.title })),
+    { id: 'daily-checklist', title: 'End-of-Day Checklist' },
+    { id: 'documentation-notes', title: 'Documentation Notes' },
+];
+
 export function DocsPage() {
     return (
         <div className="min-h-screen bg-slate-50 dark:bg-slate-950">
@@ -219,7 +226,7 @@ export function DocsPage() {
                 </div>
             </header>
 
-            <main id="top" className="max-w-6xl mx-auto px-4 sm:px-6 py-8 space-y-8">
+            <main id="top" className="max-w-7xl mx-auto px-4 sm:px-6 py-8 space-y-8">
                 <section className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl p-6 md:p-8 shadow-sm">
                     <div className="flex items-start gap-4">
                         <div className="p-3 rounded-xl bg-healthcare-primary/10 text-healthcare-primary">
@@ -238,103 +245,150 @@ export function DocsPage() {
                     </div>
                 </section>
 
-                <section className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-5 shadow-sm">
-                    <h2 className="text-xs font-black uppercase tracking-widest text-slate-500 mb-4">
-                        Daily Quick Start
-                    </h2>
-                    <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-5 gap-3">
-                        {quickStart.map((item) => (
-                            <div
-                                key={item}
-                                className="rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50/70 dark:bg-slate-800/40 p-3"
-                            >
-                                <p className="text-sm text-slate-700 dark:text-slate-200">{item}</p>
-                            </div>
-                        ))}
-                    </div>
-                </section>
-
-                <section className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-4 gap-3">
-                    {sections.map((section) => (
-                        <a
-                            key={section.id}
-                            href={`#${section.id}`}
-                            className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-3 text-xs font-black uppercase tracking-wider text-slate-700 dark:text-slate-200 hover:border-healthcare-primary hover:text-healthcare-primary transition-colors"
-                        >
-                            {section.title}
-                        </a>
-                    ))}
-                </section>
-
-                <section className="space-y-4">
-                    {sections.map((section) => {
-                        const Icon = section.icon;
-                        return (
-                            <article
-                                id={section.id}
-                                key={section.id}
-                                className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-5 shadow-sm"
-                            >
-                                <h2 className="text-lg font-black text-healthcare-dark dark:text-white flex items-center gap-2">
-                                    <Icon size={18} className="text-healthcare-primary" />
-                                    {section.title}
-                                </h2>
-                                <p className="mt-2 text-sm text-slate-600 dark:text-slate-300">
-                                    {section.summary}
-                                </p>
-                                <ol className="mt-3 space-y-2">
-                                    {section.steps.map((step, idx) => (
-                                        <li
-                                            key={step}
-                                            className="text-sm text-slate-700 dark:text-slate-200 flex items-start gap-2"
-                                        >
-                                            <span className="mt-0.5 h-5 min-w-5 rounded-full bg-healthcare-primary/10 text-healthcare-primary text-[11px] font-black flex items-center justify-center">
-                                                {idx + 1}
-                                            </span>
-                                            <span>{step}</span>
+                <section className="grid gap-6 lg:grid-cols-[280px_minmax(0,1fr)] xl:grid-cols-[320px_minmax(0,1fr)]">
+                    <aside className="lg:sticky lg:top-24 self-start space-y-4">
+                        <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl p-5 shadow-sm">
+                            <p className="text-xs font-black uppercase tracking-[0.24em] text-slate-500">
+                                Table of Contents
+                            </p>
+                            <p className="mt-3 text-sm text-slate-600 dark:text-slate-300">
+                                Jump through the guide from setup to daily closing without the card
+                                grid.
+                            </p>
+                            <nav aria-label="Documentation sections" className="mt-5">
+                                <ol className="space-y-1.5">
+                                    {tableOfContents.map((item, index) => (
+                                        <li key={item.id}>
+                                            <a
+                                                href={`#${item.id}`}
+                                                className="group flex items-start gap-3 rounded-xl px-3 py-2 text-sm text-slate-700 hover:bg-slate-100 hover:text-healthcare-primary dark:text-slate-200 dark:hover:bg-slate-800/80 dark:hover:text-white transition-colors"
+                                            >
+                                                <span className="mt-0.5 min-w-7 text-[11px] font-black tracking-wider text-slate-400 group-hover:text-healthcare-primary">
+                                                    {String(index + 1).padStart(2, '0')}
+                                                </span>
+                                                <span className="font-semibold leading-5">
+                                                    {item.title}
+                                                </span>
+                                            </a>
                                         </li>
                                     ))}
                                 </ol>
-                            </article>
-                        );
-                    })}
-                </section>
+                            </nav>
+                        </div>
 
-                <section
-                    id="daily-checklist"
-                    className="bg-teal-50 dark:bg-teal-900/20 border border-teal-200 dark:border-teal-800 rounded-2xl p-5 flex flex-wrap items-start justify-between gap-4"
-                >
-                    <div className="space-y-2">
-                        <h3 className="text-base font-black text-teal-800 dark:text-teal-200 flex items-center gap-2">
-                            <CheckCircle2 size={16} />
-                            End-of-Day Checklist
-                        </h3>
-                        <ul className="space-y-1.5">
-                            {dailyChecklist.map((item) => (
-                                <li key={item} className="text-sm text-teal-700 dark:text-teal-300">
-                                    {item}
-                                </li>
-                            ))}
-                        </ul>
+                        <div className="bg-teal-50 dark:bg-teal-900/20 border border-teal-200 dark:border-teal-800 rounded-2xl p-5">
+                            <h2 className="text-sm font-black uppercase tracking-widest text-teal-800 dark:text-teal-200">
+                                Reading Flow
+                            </h2>
+                            <p className="mt-2 text-sm text-teal-700 dark:text-teal-300">
+                                Start with quick start, follow the numbered workflows, then finish
+                                with the end-of-day checklist.
+                            </p>
+                            <a
+                                href="#top"
+                                className="mt-4 inline-flex items-center gap-2 text-xs font-black uppercase tracking-wider text-teal-800 dark:text-teal-200"
+                            >
+                                Back to Top
+                                <ArrowUpRight size={14} />
+                            </a>
+                        </div>
+                    </aside>
+
+                    <div className="space-y-4">
+                        <article
+                            id="quick-start"
+                            className="scroll-mt-24 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl p-6 shadow-sm"
+                        >
+                            <h2 className="text-lg font-black text-healthcare-dark dark:text-white flex items-center gap-2">
+                                <BookOpen size={18} className="text-healthcare-primary" />
+                                Daily Quick Start
+                            </h2>
+                            <p className="mt-2 text-sm text-slate-600 dark:text-slate-300">
+                                Use this short sequence when opening the system so urgent work is
+                                handled before routine tasks.
+                            </p>
+                            <ol className="mt-4 space-y-3">
+                                {quickStart.map((item, idx) => (
+                                    <li
+                                        key={item}
+                                        className="flex items-start gap-3 text-sm text-slate-700 dark:text-slate-200"
+                                    >
+                                        <span className="mt-0.5 flex h-6 min-w-6 items-center justify-center rounded-full bg-healthcare-primary/10 text-[11px] font-black text-healthcare-primary">
+                                            {idx + 1}
+                                        </span>
+                                        <span>{item}</span>
+                                    </li>
+                                ))}
+                            </ol>
+                        </article>
+
+                        {sections.map((section) => {
+                            const Icon = section.icon;
+                            return (
+                                <article
+                                    id={section.id}
+                                    key={section.id}
+                                    className="scroll-mt-24 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-5 shadow-sm"
+                                >
+                                    <h2 className="text-lg font-black text-healthcare-dark dark:text-white flex items-center gap-2">
+                                        <Icon size={18} className="text-healthcare-primary" />
+                                        {section.title}
+                                    </h2>
+                                    <p className="mt-2 text-sm text-slate-600 dark:text-slate-300">
+                                        {section.summary}
+                                    </p>
+                                    <ol className="mt-4 space-y-2.5">
+                                        {section.steps.map((step, idx) => (
+                                            <li
+                                                key={step}
+                                                className="text-sm text-slate-700 dark:text-slate-200 flex items-start gap-2.5"
+                                            >
+                                                <span className="mt-0.5 h-5 min-w-5 rounded-full bg-healthcare-primary/10 text-healthcare-primary text-[11px] font-black flex items-center justify-center">
+                                                    {idx + 1}
+                                                </span>
+                                                <span>{step}</span>
+                                            </li>
+                                        ))}
+                                    </ol>
+                                </article>
+                            );
+                        })}
+
+                        <section
+                            id="daily-checklist"
+                            className="scroll-mt-24 bg-teal-50 dark:bg-teal-900/20 border border-teal-200 dark:border-teal-800 rounded-2xl p-5"
+                        >
+                            <h3 className="text-base font-black text-teal-800 dark:text-teal-200 flex items-center gap-2">
+                                <CheckCircle2 size={16} />
+                                End-of-Day Checklist
+                            </h3>
+                            <ul className="mt-3 space-y-2">
+                                {dailyChecklist.map((item) => (
+                                    <li
+                                        key={item}
+                                        className="text-sm text-teal-700 dark:text-teal-300"
+                                    >
+                                        {item}
+                                    </li>
+                                ))}
+                            </ul>
+                        </section>
+
+                        <section
+                            id="documentation-notes"
+                            className="scroll-mt-24 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-5 shadow-sm"
+                        >
+                            <h3 className="text-sm font-black text-slate-700 dark:text-slate-100 flex items-center gap-2 uppercase tracking-widest">
+                                <Settings size={16} className="text-healthcare-primary" />
+                                Documentation Notes
+                            </h3>
+                            <p className="mt-2 text-sm text-slate-600 dark:text-slate-300">
+                                This documentation is hosted on the marketing web side (`/docs`)
+                                and is intended as the primary training and reference manual for
+                                all teams.
+                            </p>
+                        </section>
                     </div>
-                    <a
-                        href="#top"
-                        className="inline-flex items-center gap-2 px-3 py-2 rounded-lg bg-teal-700 text-white text-xs font-black uppercase tracking-wider hover:bg-teal-800"
-                    >
-                        Back to Top
-                        <ArrowUpRight size={14} />
-                    </a>
-                </section>
-
-                <section className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-5 shadow-sm">
-                    <h3 className="text-sm font-black text-slate-700 dark:text-slate-100 flex items-center gap-2 uppercase tracking-widest">
-                        <Settings size={16} className="text-healthcare-primary" />
-                        Documentation Notes
-                    </h3>
-                    <p className="mt-2 text-sm text-slate-600 dark:text-slate-300">
-                        This documentation is hosted on the marketing web side (`/docs`) and is
-                        intended as the primary training and reference manual for all teams.
-                    </p>
                 </section>
             </main>
         </div>

@@ -51,8 +51,8 @@ const ACTIVE_ORDER_STATUSES = [
     'backordered',
 ] as const;
 
-// Orders that show up in the "Receiving" tab
-const RECEIVING_ORDER_STATUSES = new Set([
+// Orders included in the "Receiving due" quick filter
+const RECEIVING_DUE_STATUSES = new Set([
     'approved',
     'confirmed',
     'accepted',
@@ -569,12 +569,9 @@ export function ProcurementPage() {
         null,
     );
     const [pendingFile, setPendingFile] = useState<File | null>(null);
-    const activeTab: 'orders' | 'suppliers' | 'receiving' = location.pathname.includes('/suppliers')
+    const activeTab: 'orders' | 'suppliers' = location.pathname.includes('/suppliers')
         ? 'suppliers'
-        : location.pathname.includes('/receiving')
-          ? 'receiving'
-          : 'orders';
-    const isOrderWorkflowTab = activeTab === 'orders' || activeTab === 'receiving';
+        : 'orders';
     const { visibleColumnSet: procurementVisibleColumnSet } = useTableViewState(
         'procurement-orders',
         PROCUREMENT_ORDER_TABLE_COLUMNS,
@@ -636,20 +633,13 @@ export function ProcurementPage() {
     };
 
     useEffect(() => {
-        if (isOrderWorkflowTab) {
+        if (activeTab === 'orders') {
             const timer = setTimeout(() => {
                 fetchOrders();
             }, 500);
             return () => clearTimeout(timer);
         }
-    }, [statusFilter, searchTerm, startDate, endDate, page, limit, isOrderWorkflowTab]);
-
-    useEffect(() => {
-        setPage(1);
-        if (activeTab === 'receiving' && statusFilter === 'all') {
-            setStatusFilter('approved');
-        }
-    }, [activeTab, statusFilter]);
+    }, [statusFilter, searchTerm, startDate, endDate, page, limit, activeTab]);
 
     useEffect(() => {
         fetchSuppliers();
@@ -748,14 +738,7 @@ export function ProcurementPage() {
     };
     const visibleOrders = useMemo(() => {
         const now = new Date();
-        const baseRows =
-            activeTab === 'receiving'
-                ? orders.filter((order) =>
-                      RECEIVING_ORDER_STATUSES.has(String(order.status || '').toLowerCase()),
-                  )
-                : orders;
-
-        const filteredRows = baseRows.filter((order) => {
+        const filteredRows = orders.filter((order) => {
             const orderStatus = String(order.status || '').toLowerCase();
             const expectedDelivery = order.expected_delivery_date
                 ? parseLocalDate(order.expected_delivery_date)
@@ -767,7 +750,7 @@ export function ProcurementPage() {
 
             if (quickPreset === 'pending') return orderStatus === 'pending';
             if (quickPreset === 'receiving_due') {
-                return RECEIVING_ORDER_STATUSES.has(orderStatus);
+                return RECEIVING_DUE_STATUSES.has(orderStatus);
             }
             if (quickPreset === 'overdue') return isOverdue;
             if (quickPreset === 'received') return orderStatus === 'received';
@@ -834,7 +817,7 @@ export function ProcurementPage() {
                 return;
             }
 
-            if (key === 'r' && isOrderWorkflowTab) {
+            if (key === 'r' && activeTab === 'orders') {
                 event.preventDefault();
                 const receivableOrder = visibleOrders.find((order) =>
                     RECEIVABLE_ORDER_STATUSES.has(String(order.status || '').toLowerCase()),
@@ -852,7 +835,6 @@ export function ProcurementPage() {
         return () => window.removeEventListener('keydown', handleShortcuts);
     }, [
         activeTab,
-        isOrderWorkflowTab,
         isPOModalOpen,
         isPreviewOpen,
         isProcurementAuditor,
@@ -889,11 +871,7 @@ export function ProcurementPage() {
                     <div className="flex flex-col md:flex-row items-center justify-between gap-4 w-full">
                         <div className="flex-1 space-y-2 w-full">
                             <h2 className="text-2xl font-black text-healthcare-dark dark:text-white tracking-tight">
-                                {activeTab === 'suppliers'
-                                    ? 'Suppliers'
-                                    : activeTab === 'receiving'
-                                      ? 'Stock Receiving'
-                                      : 'Procurement & Orders'}
+                                {activeTab === 'suppliers' ? 'Suppliers' : 'Procurement & Orders'}
                             </h2>
                         </div>
                         {activeTab === 'orders' &&
@@ -951,7 +929,7 @@ export function ProcurementPage() {
                         {}
                         <div className="space-y-4">
                             <TableToolbar
-                                layout="stacked"
+                                layout="inline"
                                 searchValue={searchTerm}
                                 onSearchChange={setSearchTerm}
                                 searchPlaceholder="Search PO#, Supplier..."
@@ -965,9 +943,6 @@ export function ProcurementPage() {
                                 }}
                                 filters={
                                     <>
-                                        <span className="h-11 sm:h-10 inline-flex items-center text-[10px] font-black text-slate-400 tracking-widest whitespace-nowrap mr-1">
-                                            Status
-                                        </span>
                                         <select
                                             value={statusFilter}
                                             onChange={(e) => {
@@ -1429,9 +1404,7 @@ export function ProcurementPage() {
                                                                 className="text-slate-300"
                                                             />
                                                             <span className="text-slate-500 font-bold italic">
-                                                                {activeTab === 'receiving'
-                                                                    ? 'No orders currently require receiving'
-                                                                    : 'No procurement orders found'}
+                                                                No procurement orders found
                                                             </span>
                                                         </div>
                                                     </td>

@@ -12,17 +12,9 @@ const ProcurementPage = lazyNamed(
     () => import('../../pages/procurement/ProcurementPage'),
     'ProcurementPage',
 );
-const GoodsReceiptsPage = lazyNamed(
-    () => import('../../pages/procurement/GoodsReceiptsPage'),
-    'GoodsReceiptsPage',
-);
 const ViewOrderPage = lazyNamed(
     () => import('../../pages/procurement/ViewOrderPage'),
     'ViewOrderPage',
-);
-const ViewGoodsReceiptPage = lazyNamed(
-    () => import('../../pages/procurement/ViewGoodsReceiptPage'),
-    'ViewGoodsReceiptPage',
 );
 
 export const createProcurementRoutes = (parentRoute: any) => {
@@ -65,14 +57,13 @@ export const createProcurementRoutes = (parentRoute: any) => {
     const receivingRoute = createRoute({
         getParentRoute: () => procurementRoute,
         path: 'receiving',
-        component: () => withRouteSuspense(<ProcurementPage />),
-        validateSearch: (search: Record<string, unknown>) => drawerSearchSchema.parse(search),
+        component: () => <Navigate to={'/app/procurement/orders' as any} search={{} as any} />,
     });
 
     const receiptsRoute = createRoute({
         getParentRoute: () => procurementRoute,
         path: 'receipts',
-        component: () => withRouteSuspense(<GoodsReceiptsPage />),
+        component: () => <Navigate to={'/app/procurement/orders' as any} search={{} as any} />,
     });
 
     const viewOrderRoute = createRoute({
@@ -84,7 +75,7 @@ export const createProcurementRoutes = (parentRoute: any) => {
     const viewGoodsReceiptRoute = createRoute({
         getParentRoute: () => procurementRoute,
         path: 'receipts/$receiptId',
-        component: () => withRouteSuspense(<ViewGoodsReceiptPage />),
+        component: () => <Navigate to={'/app/procurement/orders' as any} search={{} as any} />,
     });
 
     return [

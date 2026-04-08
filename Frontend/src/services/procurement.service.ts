@@ -1,5 +1,5 @@
 import api from '../lib/api';
-import type { ProcurementOrder, PaginatedResponse, GoodsReceipt } from '../types/pharmacy';
+import type { ProcurementOrder, PaginatedResponse } from '../types/pharmacy';
 import { normalizePaginatedResponse } from './utils';
 
 export const procurementService = {
@@ -23,22 +23,6 @@ export const procurementService = {
 
     async getProcurementOrder(id: number): Promise<ProcurementOrder> {
         const response = await api.get<{ data: ProcurementOrder }>(`/pharmacy/procurement/${id}`);
-        return (response.data as any).data ?? response.data;
-    },
-
-    async getGoodsReceipts(params?: {
-        facility_id?: number;
-        page?: number;
-        limit?: number;
-    }): Promise<PaginatedResponse<GoodsReceipt>> {
-        const response = await api.get<any>('/pharmacy/procurement/goods-receipts', { params });
-        return normalizePaginatedResponse<GoodsReceipt>(response.data);
-    },
-
-    async getGoodsReceipt(id: number): Promise<GoodsReceipt> {
-        const response = await api.get<{ data: GoodsReceipt }>(
-            `/pharmacy/procurement/goods-receipts/${id}`,
-        );
         return (response.data as any).data ?? response.data;
     },
 

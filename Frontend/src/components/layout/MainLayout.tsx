@@ -23,6 +23,7 @@ import {
     ArrowLeft,
     ShieldCheck,
     Receipt,
+    RotateCcw,
 } from 'lucide-react';
 import logo from '../../assets/tanga-logo.png';
 import { useAuth } from '../../context/AuthContext';
@@ -146,8 +147,7 @@ const NAV_SECTIONS: NavSection[] = [
                 children: [
                     { to: '/app/inventory', icon: Package, label: 'Medicines' },
                     { to: '/app/stock', icon: Database, label: 'Batches' },
-                    { to: '/app/analytics/recall', icon: Bell, label: 'Expiry monitoring & recalls' },
-                    { to: '/app/analytics/low-stock', icon: Bell, label: 'Low Stock' },
+                    { to: '/app/recalls', icon: Bell, label: 'Expiry monitoring & recalls' },
                     { to: '/app/stocktaking', icon: Database, label: 'Stock Adjustments' },
                     { to: '/app/stock-movements', icon: Database, label: 'Stock Movements' },
                 ],
@@ -175,8 +175,6 @@ const NAV_SECTIONS: NavSection[] = [
                 children: [
                     { to: '/app/procurement/suppliers', icon: Factory, label: 'Suppliers' },
                     { to: '/app/procurement/orders', icon: ShoppingCart, label: 'Purchase Orders' },
-                    { to: '/app/procurement/receipts', icon: Receipt, label: 'Goods Receipts' },
-                    { to: '/app/procurement/receiving', icon: Database, label: 'Receiving' },
                 ],
             },
         ],
@@ -202,6 +200,12 @@ const NAV_SECTIONS: NavSection[] = [
                 ],
                 children: [
                     { to: '/app/dispensing', icon: Zap, label: 'Dispensing' },
+                    {
+                        to: '/app/analytics/returns',
+                        icon: RotateCcw,
+                        label: 'Returns',
+                        allowedPermissions: ['reports:read'],
+                    },
                     {
                         to: '/app/patients',
                         icon: Users,
@@ -247,38 +251,10 @@ const NAV_SECTIONS: NavSection[] = [
                         allowedPermissions: ['reports:read'],
                     },
                     {
-                        to: '/app/analytics/low-stock',
-                        icon: FileText,
-                        label: 'Low Stock',
-                        subsection: 'Operations',
-                        allowedPermissions: ['reports:read'],
-                    },
-                    {
-                        to: '/app/analytics/movement',
-                        icon: FileText,
-                        label: 'Movements',
-                        subsection: 'Operations',
-                        allowedPermissions: ['reports:read'],
-                    },
-                    {
                         to: '/app/analytics/procurement',
                         icon: FileText,
                         label: 'Purchase',
                         subsection: 'Operations',
-                        allowedPermissions: ['reports:read'],
-                    },
-                    {
-                        to: '/app/analytics/recall',
-                        icon: FileText,
-                        label: 'Expiry',
-                        subsection: 'Inventory Intelligence',
-                        allowedPermissions: ['reports:read'],
-                    },
-                    {
-                        to: '/app/analytics/near-expiry-actions',
-                        icon: FileText,
-                        label: 'Near-Expiry Actions',
-                        subsection: 'Inventory Intelligence',
                         allowedPermissions: ['reports:read'],
                     },
                     {

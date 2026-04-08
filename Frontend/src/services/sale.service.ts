@@ -14,6 +14,16 @@ export const saleService = {
         return (response.data as any).data ?? response.data;
     },
 
+    async getSales(params?: {
+        page?: number;
+        limit?: number;
+        patient_id?: number;
+        search?: string;
+    }): Promise<PaginatedResponse<Sale>> {
+        const response = await api.get<any>('/pharmacy/sales', { params });
+        return normalizePaginatedResponse<Sale>(response.data);
+    },
+
     async getSaleReceipt(id: number, facilityId: number): Promise<void> {
         const response = await api.get(`/pharmacy/sales/${id}/receipt`, {
             params: { facilityId },

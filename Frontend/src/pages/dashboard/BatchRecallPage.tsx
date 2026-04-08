@@ -1,25 +1,121 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { useAuth } from '../../context/AuthContext';
 import { pharmacyService } from '../../services/pharmacy.service';
 import { ProtectedRoute } from '../../components/auth/ProtectedRoute';
 import type { BatchRecall, Batch } from '../../types/pharmacy';
 import { RecallStatus, RecallReason } from '../../types/pharmacy';
 import { format } from 'date-fns';
-import { parseLocalDate } from '../../lib/date';
+import { formatLocalDate, parseLocalDate } from '../../lib/date';
 import { LifeBuoy, Plus, Search, AlertCircle, Download, Eye, ChevronRight } from 'lucide-react';
 import { SkeletonTable } from '../../components/ui/SkeletonTable';
+
+type InventoryView = 'expiry-actions' | 'recalls';
+type ExpiryRisk = 'expired' | 'critical' | 'high' | 'warning' | 'medium' | 'watch' | 'low';
+type ExpiryActionType = 'markdown' | 'transfer' | 'vendor_return' | 'disposal' | 'monitor';
+
+interface ExpiryReportItem {
+    batch_id: number;
+    batch_number: string;
+    medicine_name: string;
+    expiry_date: string;
+    days_until_expiry?: number;
+    quantity: number;
+    risk_level?: 'critical' | 'warning' | 'watch' | 'expired';
+    recommended_action?: string;
+}
+
+interface ExpiryReportResponse {
+    expiring_soon: ExpiryReportItem[];
+    expired: ExpiryReportItem[];
+}
+
+interface NearExpiryActionItem {
+    stock_id: number;
+    medicine_id: number;
+    medicine_name: string;
+    batch_id: number;
+    batch_number: string;
+    quantity: number;
+    days_to_expiry: number;
+    risk_value: number;
+    risk_level: 'low' | 'medium' | 'high' | 'critical';
+    recommended_action: ExpiryActionType;
+    action_reason: string;
+}
+
+interface ExpiryActionsResponse {
+    summary: Record<ExpiryActionType, number>;
+    items: NearExpiryActionItem[];
+}
+
+interface CombinedExpiryActionRow {
+    batchId: number;
+    batchNumber: string;
+    medicineName: string;
+    expiryDate: string;
+    daysLeft: number;
+    quantity: number;
+    riskLevel: ExpiryRisk;
+    action: string;
+    actionReason: string;
+    riskValue: number;
+    status: 'expired' | 'expiring_soon';
+}
+
+const EXPIRY_WINDOW_OPTIONS = [30, 60, 90, 120, 180] as const;
+
+function formatActionLabel(value: string) {
+    return value.replace(/_/g, ' ');
+}
+
+function resolveRiskLevel(item: ExpiryReportItem): ExpiryRisk {
+    if (item.risk_level) return item.risk_level;
+    const daysLeft = Number(item.days_until_expiry ?? 999);
+    if (daysLeft <= 0) return 'expired';
+    if (daysLeft <= 7) return 'critical';
+    if (daysLeft <= 30) return 'warning';
+    return 'watch';
+}
+
+function getRiskTone(level: ExpiryRisk) {
+    if (level === 'expired' || level === 'critical' || level === 'high') {
+        return 'bg-rose-50 text-rose-700 border-rose-200 dark:bg-rose-900/10 dark:text-rose-300 dark:border-rose-900/30';
+    }
+    if (level === 'warning' || level === 'medium') {
+        return 'bg-amber-50 text-amber-700 border-amber-200 dark:bg-amber-900/10 dark:text-amber-300 dark:border-amber-900/30';
+    }
+    return 'bg-sky-50 text-sky-700 border-sky-200 dark:bg-sky-900/10 dark:text-sky-300 dark:border-sky-900/30';
+}
+
+function getActionTone(action: string) {
+    if (action === 'disposal') {
+        return 'bg-rose-50 text-rose-700 border-rose-200 dark:bg-rose-900/10 dark:text-rose-300 dark:border-rose-900/30';
+    }
+    if (action === 'vendor_return' || action === 'transfer') {
+        return 'bg-amber-50 text-amber-700 border-amber-200 dark:bg-amber-900/10 dark:text-amber-300 dark:border-amber-900/30';
+    }
+    if (action === 'markdown') {
+        return 'bg-indigo-50 text-indigo-700 border-indigo-200 dark:bg-indigo-900/10 dark:text-indigo-300 dark:border-indigo-900/30';
+    }
+    return 'bg-slate-100 text-slate-700 border-slate-200 dark:bg-slate-800 dark:text-slate-200 dark:border-slate-700';
+}
 
 export function BatchRecallPage() {
     const { user, facilityId } = useAuth();
     const effectiveFacilityId = facilityId ?? user?.facility_id;
     const [recalls, setRecalls] = useState<BatchRecall[]>([]);
-    const [loading, setLoading] = useState(false);
+    const [recallsLoading, setRecallsLoading] = useState(false);
+    const [expiryLoading, setExpiryLoading] = useState(false);
     const [view, setView] = useState<'list' | 'detail' | 'initiate'>('list');
+    const [inventoryView, setInventoryView] = useState<InventoryView>('expiry-actions');
+    const [expiryWindowDays, setExpiryWindowDays] = useState<number>(90);
+    const [expirySearch, setExpirySearch] = useState('');
     const [selectedRecall, setSelectedRecall] = useState<BatchRecall | null>(null);
+    const [expiryRows, setExpiryRows] = useState<CombinedExpiryActionRow[]>([]);
 
     const loadRecalls = async () => {
         if (!effectiveFacilityId) return;
-        setLoading(true);
+        setRecallsLoading(true);
         try {
             const response = await pharmacyService.getRecalls({
                 facility_id: effectiveFacilityId,
@@ -30,20 +126,124 @@ export function BatchRecallPage() {
         } catch (error) {
             console.error('Failed to load recalls', error);
         } finally {
-            setLoading(false);
+            setRecallsLoading(false);
+        }
+    };
+
+    const loadExpiryActions = async () => {
+        if (!effectiveFacilityId) return;
+        setExpiryLoading(true);
+        try {
+            const [expiryReport, actionPlan] = await Promise.all([
+                pharmacyService.getExpiryReport(Number(effectiveFacilityId), {
+                    days: expiryWindowDays,
+                }) as Promise<ExpiryReportResponse>,
+                pharmacyService.getNearExpiryActions({
+                    facilityId: Number(effectiveFacilityId),
+                    horizon_days: expiryWindowDays,
+                }) as Promise<ExpiryActionsResponse>,
+            ]);
+
+            const actionMap = new Map<number, NearExpiryActionItem>(
+                (actionPlan.items || []).map((item) => [item.batch_id, item]),
+            );
+            const baseRows = [
+                ...(expiryReport.expired || []).map((item) => ({
+                    ...item,
+                    status: 'expired' as const,
+                })),
+                ...(expiryReport.expiring_soon || []).map((item) => ({
+                    ...item,
+                    status: 'expiring_soon' as const,
+                })),
+            ];
+
+            const mergedRows = baseRows
+                .map((item) => {
+                    const action = actionMap.get(item.batch_id);
+                    const riskLevel = (action?.risk_level || resolveRiskLevel(item)) as ExpiryRisk;
+                    const defaultAction =
+                        item.status === 'expired'
+                            ? 'disposal'
+                            : item.recommended_action || 'monitor';
+                    return {
+                        batchId: item.batch_id,
+                        batchNumber: item.batch_number,
+                        medicineName: item.medicine_name,
+                        expiryDate: item.expiry_date,
+                        daysLeft:
+                            Number(action?.days_to_expiry ?? item.days_until_expiry ?? 0) ||
+                            (item.status === 'expired' ? 0 : 0),
+                        quantity: Number(action?.quantity ?? item.quantity ?? 0),
+                        riskLevel,
+                        action: String(action?.recommended_action || defaultAction),
+                        actionReason:
+                            action?.action_reason ||
+                            (item.status === 'expired'
+                                ? 'Expired stock should be isolated from sale and sent to disposal or formal return handling.'
+                                : 'Action is based on the selected expiry window and current stock risk.'),
+                        riskValue: Number(action?.risk_value || 0),
+                        status: item.status,
+                    };
+                })
+                .sort((a, b) => {
+                    if (a.status !== b.status) {
+                        return a.status === 'expired' ? -1 : 1;
+                    }
+                    return a.daysLeft - b.daysLeft || b.riskValue - a.riskValue;
+                });
+
+            setExpiryRows(mergedRows);
+        } catch (error) {
+            console.error('Failed to load expiry actions', error);
+            setExpiryRows([]);
+        } finally {
+            setExpiryLoading(false);
         }
     };
 
     useEffect(() => {
-        if (view === 'list') {
+        if (view === 'list' && inventoryView === 'recalls') {
             loadRecalls();
         }
-    }, [effectiveFacilityId, view]);
+    }, [effectiveFacilityId, inventoryView, view]);
+
+    useEffect(() => {
+        if (view === 'list' && inventoryView === 'expiry-actions') {
+            loadExpiryActions();
+        }
+    }, [effectiveFacilityId, expiryWindowDays, inventoryView, view]);
 
     const handleViewDetail = (recall: BatchRecall) => {
         setSelectedRecall(recall);
         setView('detail');
     };
+
+    const filteredExpiryRows = useMemo(() => {
+        const query = expirySearch.trim().toLowerCase();
+        if (!query) return expiryRows;
+        return expiryRows.filter((row) =>
+            [
+                row.medicineName,
+                row.batchNumber,
+                formatActionLabel(row.action),
+                row.actionReason,
+                row.riskLevel,
+            ]
+                .join(' ')
+                .toLowerCase()
+                .includes(query),
+        );
+    }, [expiryRows, expirySearch]);
+
+    const expirySummary = useMemo(() => {
+        return {
+            total: expiryRows.length,
+            expired: expiryRows.filter((row) => row.status === 'expired').length,
+            disposal: expiryRows.filter((row) => row.action === 'disposal').length,
+            vendorReturn: expiryRows.filter((row) => row.action === 'vendor_return').length,
+        };
+    }, [expiryRows]);
 
     if (view === 'initiate') {
         return <InitiateRecallForm onBack={() => setView('list')} />;
@@ -70,22 +270,231 @@ export function BatchRecallPage() {
                 <div className="flex justify-between items-center">
                     <div>
                         <h1 className="text-2xl font-black text-healthcare-dark dark:text-white flex items-center gap-2">
-                            <LifeBuoy className="text-rose-500" /> Batch Recalls
+                            <LifeBuoy className="text-rose-500" /> Expiry Monitoring & Recalls
                         </h1>
                         <p className="text-slate-500 text-sm mt-1">
-                            Manage medication recalls, notify patients, and track recovered
-                            inventory.
+                            Review expiring batches, recommended actions, and formal recall cases
+                            from one stock workspace.
                         </p>
                     </div>
-                    <button
-                        onClick={() => setView('initiate')}
-                        className="flex items-center gap-2 px-4 py-2 bg-rose-600 text-white rounded-lg text-sm font-bold hover:bg-rose-700 transition-colors shadow-md"
-                    >
-                        <Plus size={18} /> Initiate Recall
-                    </button>
+                    {inventoryView === 'recalls' && (
+                        <button
+                            onClick={() => setView('initiate')}
+                            className="flex items-center gap-2 px-4 py-2 bg-rose-600 text-white rounded-lg text-sm font-bold hover:bg-rose-700 transition-colors shadow-md"
+                        >
+                            <Plus size={18} /> Initiate Recall
+                        </button>
+                    )}
                 </div>
 
-                {loading ? (
+                <div className="flex flex-wrap items-center gap-2">
+                    {(
+                        [
+                            ['expiry-actions', 'Expiry Actions'],
+                            ['recalls', 'Recalls'],
+                        ] as Array<[InventoryView, string]>
+                    ).map(([value, label]) => (
+                        <button
+                            key={value}
+                            onClick={() => setInventoryView(value)}
+                            className={[
+                                'rounded-xl px-4 py-2 text-[11px] font-black uppercase tracking-widest transition-colors',
+                                inventoryView === value
+                                    ? 'bg-healthcare-primary text-white shadow-sm'
+                                    : 'text-slate-500 hover:bg-slate-100 hover:text-healthcare-dark dark:text-slate-300 dark:hover:bg-slate-800 dark:hover:text-white',
+                            ].join(' ')}
+                        >
+                            {label}
+                        </button>
+                    ))}
+                </div>
+
+                {inventoryView === 'expiry-actions' ? (
+                    <section className="space-y-4">
+                        <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+                            <div className="flex flex-wrap items-center gap-2 text-xs font-semibold text-slate-500">
+                                <span>{expirySummary.total.toLocaleString()} batches</span>
+                                <span className="text-slate-300">•</span>
+                                <span>{expirySummary.expired.toLocaleString()} expired</span>
+                                <span className="text-slate-300">•</span>
+                                <span>
+                                    {expirySummary.disposal.toLocaleString()} disposal actions
+                                </span>
+                                <span className="text-slate-300">•</span>
+                                <span>
+                                    {expirySummary.vendorReturn.toLocaleString()} vendor return
+                                    candidates
+                                </span>
+                            </div>
+                            <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+                                <label className="flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 dark:border-slate-700 dark:bg-slate-900">
+                                    <span className="whitespace-nowrap text-[10px] font-black uppercase tracking-widest text-slate-500">
+                                        Window
+                                    </span>
+                                    <select
+                                        value={String(expiryWindowDays)}
+                                        onChange={(e) =>
+                                            setExpiryWindowDays(Number(e.target.value) || 90)
+                                        }
+                                        className="bg-transparent text-xs font-black uppercase tracking-wider text-slate-700 outline-none dark:text-slate-200"
+                                    >
+                                        {EXPIRY_WINDOW_OPTIONS.map((option) => (
+                                            <option key={option} value={option}>
+                                                {option} days
+                                            </option>
+                                        ))}
+                                    </select>
+                                </label>
+                                <label className="relative block">
+                                    <Search
+                                        className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"
+                                        size={16}
+                                    />
+                                    <input
+                                        type="text"
+                                        value={expirySearch}
+                                        onChange={(e) => setExpirySearch(e.target.value)}
+                                        placeholder="Search medicine, batch, action..."
+                                        className="w-full min-w-[280px] rounded-lg border border-slate-200 bg-white py-2 pl-9 pr-3 text-sm text-slate-700 outline-none transition-colors focus:border-healthcare-primary dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200"
+                                    />
+                                </label>
+                            </div>
+                        </div>
+
+                        {expiryLoading ? (
+                            <SkeletonTable
+                                rows={8}
+                                columns={9}
+                                headers={[
+                                    'Medicine',
+                                    'Batch',
+                                    'Expiry',
+                                    'Days Left',
+                                    'Qty',
+                                    'Risk',
+                                    'Action',
+                                    'Reason',
+                                    'Risk Value',
+                                ]}
+                                columnAligns={[
+                                    'left',
+                                    'left',
+                                    'left',
+                                    'right',
+                                    'right',
+                                    'left',
+                                    'left',
+                                    'left',
+                                    'right',
+                                ]}
+                                className="border-none shadow-none"
+                            />
+                        ) : (
+                            <div className="overflow-hidden rounded-xl border border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-900">
+                                <div className="overflow-x-auto">
+                                    <table className="tc-table w-full text-left text-sm whitespace-nowrap">
+                                        <thead className="bg-slate-50 dark:bg-slate-800/50">
+                                            <tr>
+                                                <th className="px-5 py-4 font-bold text-slate-500">
+                                                    Medicine
+                                                </th>
+                                                <th className="px-5 py-4 font-bold text-slate-500">
+                                                    Batch
+                                                </th>
+                                                <th className="px-5 py-4 font-bold text-slate-500">
+                                                    Expiry
+                                                </th>
+                                                <th className="px-5 py-4 text-right font-bold text-slate-500">
+                                                    Days Left
+                                                </th>
+                                                <th className="px-5 py-4 text-right font-bold text-slate-500">
+                                                    Qty
+                                                </th>
+                                                <th className="px-5 py-4 font-bold text-slate-500">
+                                                    Risk
+                                                </th>
+                                                <th className="px-5 py-4 font-bold text-slate-500">
+                                                    Action
+                                                </th>
+                                                <th className="px-5 py-4 font-bold text-slate-500">
+                                                    Reason
+                                                </th>
+                                                <th className="px-5 py-4 text-right font-bold text-slate-500">
+                                                    Risk Value
+                                                </th>
+                                            </tr>
+                                        </thead>
+                                        <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+                                            {filteredExpiryRows.length > 0 ? (
+                                                filteredExpiryRows.map((row) => (
+                                                    <tr
+                                                        key={row.batchId}
+                                                        className="hover:bg-slate-50/60 dark:hover:bg-slate-800/40"
+                                                    >
+                                                        <td className="px-5 py-4">
+                                                            <div className="font-semibold text-slate-900 dark:text-white">
+                                                                {row.medicineName}
+                                                            </div>
+                                                            <div className="text-[11px] text-slate-400">
+                                                                {row.status === 'expired'
+                                                                    ? 'Expired batch'
+                                                                    : 'Expiring soon'}
+                                                            </div>
+                                                        </td>
+                                                        <td className="px-5 py-4 font-medium text-slate-700 dark:text-slate-200">
+                                                            {row.batchNumber}
+                                                        </td>
+                                                        <td className="px-5 py-4 text-slate-600 dark:text-slate-300">
+                                                            {formatLocalDate(row.expiryDate)}
+                                                        </td>
+                                                        <td className="px-5 py-4 text-right font-semibold text-slate-700 dark:text-slate-200">
+                                                            {row.status === 'expired'
+                                                                ? 'Expired'
+                                                                : row.daysLeft}
+                                                        </td>
+                                                        <td className="px-5 py-4 text-right font-semibold text-slate-700 dark:text-slate-200">
+                                                            {row.quantity.toLocaleString()}
+                                                        </td>
+                                                        <td className="px-5 py-4">
+                                                            <span
+                                                                className={`inline-flex rounded-full border px-2.5 py-1 text-[10px] font-black uppercase tracking-widest ${getRiskTone(row.riskLevel)}`}
+                                                            >
+                                                                {formatActionLabel(row.riskLevel)}
+                                                            </span>
+                                                        </td>
+                                                        <td className="px-5 py-4">
+                                                            <span
+                                                                className={`inline-flex rounded-full border px-2.5 py-1 text-[10px] font-black uppercase tracking-widest ${getActionTone(row.action)}`}
+                                                            >
+                                                                {formatActionLabel(row.action)}
+                                                            </span>
+                                                        </td>
+                                                        <td className="px-5 py-4 max-w-[340px] whitespace-normal text-sm text-slate-500 dark:text-slate-400">
+                                                            {row.actionReason}
+                                                        </td>
+                                                        <td className="px-5 py-4 text-right font-semibold text-slate-700 dark:text-slate-200">
+                                                            RWF {row.riskValue.toLocaleString()}
+                                                        </td>
+                                                    </tr>
+                                                ))
+                                            ) : (
+                                                <tr>
+                                                    <td
+                                                        colSpan={9}
+                                                        className="px-6 py-12 text-center text-slate-400"
+                                                    >
+                                                        No expiry action rows found for the selected
+                                                        window.
+                                                    </td>
+                                                </tr>
+                                            )}
+                                        </tbody>
+                                    </table>
+                                </div>
+                            </div>
+                        )}
+                    </section>
+                ) : recallsLoading ? (
                     <SkeletonTable
                         rows={5}
                         columns={7}

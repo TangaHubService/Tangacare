@@ -4,7 +4,6 @@ import {
     ArrowRight,
     Minus,
     Plus,
-    CreditCard,
     Smartphone,
     Wallet,
     FileText,
@@ -24,26 +23,28 @@ export const CreateReturnModal = ({ sale, onClose, onSuccess }: CreateReturnModa
     const [notes, setNotes] = useState('');
     const [refundMethod, setRefundMethod] = useState<RefundMethod>('cash');
     const [returnItems, setReturnItems] = useState<
-        Array<{
-            sale_item_id: number;
-            medicine_id: number;
-            batch_id: number;
-            medicine_name: string;
-            max_quantity: number;
-            quantity_returned: number;
-            reason: ReturnReason;
+            Array<{
+                sale_item_id: number;
+                medicine_id: number;
+                batch_id: number;
+                batch_number?: string;
+                medicine_name: string;
+                max_quantity: number;
+                quantity_returned: number;
+                reason: ReturnReason;
             condition: ItemCondition;
             unit_price: number;
         }>
     >(
         sale.items?.map((item) => ({
-            sale_item_id: item.id,
-            medicine_id: item.medicine_id,
-            batch_id: item.batch_id,
-            medicine_name: item.medicine?.name || 'Medicine',
-            max_quantity: item.quantity,
-            quantity_returned: 0,
-            reason: 'customer_request',
+                sale_item_id: item.id,
+                medicine_id: item.medicine_id,
+                batch_id: item.batch_id,
+                batch_number: item.batch?.batch_number,
+                medicine_name: item.medicine?.name || 'Medicine',
+                max_quantity: item.quantity,
+                quantity_returned: 0,
+                reason: 'customer_request',
             condition: 'resellable',
             unit_price: item.unit_price,
         })) || [],
@@ -96,6 +97,7 @@ export const CreateReturnModal = ({ sale, onClose, onSuccess }: CreateReturnModa
                     reason: item.reason,
                     condition: item.condition,
                     refund_amount: item.quantity_returned * item.unit_price,
+                    restore_to_stock: item.condition === 'resellable',
                 })),
         };
 
@@ -142,6 +144,11 @@ export const CreateReturnModal = ({ sale, onClose, onSuccess }: CreateReturnModa
                                             <p className="text-xs text-slate-400 font-medium">
                                                 Unit Price: RWF {item.unit_price.toLocaleString()}
                                             </p>
+                                            {item.batch_number && (
+                                                <p className="text-[10px] text-slate-400 font-medium uppercase tracking-wider">
+                                                    Batch {item.batch_number}
+                                                </p>
+                                            )}
                                         </div>
                                         <div className="flex items-center gap-3">
                                             <button
@@ -189,6 +196,10 @@ export const CreateReturnModal = ({ sale, onClose, onSuccess }: CreateReturnModa
                                                     <option value="damaged">Damaged</option>
                                                     <option value="expired">Expired</option>
                                                     <option value="wrong_item">Wrong Item</option>
+                                                    <option value="adverse_reaction">
+                                                        Adverse Reaction
+                                                    </option>
+                                                    <option value="other">Other</option>
                                                 </select>
                                             </div>
                                             <div className="space-y-1.5">
@@ -248,18 +259,8 @@ export const CreateReturnModal = ({ sale, onClose, onSuccess }: CreateReturnModa
                                     <Smartphone size={16} /> MoMo
                                 </button>
                                 <button
-                                    onClick={() => setRefundMethod('card')}
-                                    className={`flex items-center gap-2 p-3 rounded-xl border text-xs font-bold transition-all ${
-                                        refundMethod === 'card'
-                                            ? 'bg-healthcare-primary text-white border-healthcare-primary'
-                                            : 'bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800 text-slate-600'
-                                    }`}
-                                >
-                                    <CreditCard size={16} /> Card
-                                </button>
-                                <button
                                     onClick={() => setRefundMethod('credit_note')}
-                                    className={`flex items-center gap-2 p-3 rounded-xl border text-xs font-bold transition-all ${
+                                    className={`col-span-2 flex items-center gap-2 p-3 rounded-xl border text-xs font-bold transition-all ${
                                         refundMethod === 'credit_note'
                                             ? 'bg-healthcare-primary text-white border-healthcare-primary'
                                             : 'bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800 text-slate-600'

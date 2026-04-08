@@ -582,7 +582,9 @@ export interface Sale {
     sale_number: string;
     facility_id: number;
     patient_id?: number | null;
+    patient?: User | null;
     cashier_id: number;
+    cashier?: User | null;
     subtotal: number;
     vat_rate: number;
     vat_amount: number;
@@ -816,8 +818,14 @@ export interface PhysicalCount {
 }
 // Returns System Types
 export type ReturnStatus = 'pending' | 'approved' | 'rejected' | 'completed';
-export type RefundMethod = 'cash' | 'mobile_money' | 'card' | 'credit_note';
-export type ReturnReason = 'customer_request' | 'damaged' | 'expired' | 'wrong_item';
+export type RefundMethod = 'cash' | 'mobile_money' | 'credit_note';
+export type ReturnReason =
+    | 'customer_request'
+    | 'damaged'
+    | 'expired'
+    | 'wrong_item'
+    | 'adverse_reaction'
+    | 'other';
 export type ItemCondition = 'resellable' | 'damaged' | 'expired';
 
 export interface CustomerReturnItem {
@@ -851,8 +859,13 @@ export interface CustomerReturn {
     notes?: string;
     credit_note_id?: number | null;
     approved_at?: string | null;
+    rejected_at?: string | null;
+    rejection_reason?: string | null;
+    refund_processed_at?: string | null;
     created_at: string;
     items?: CustomerReturnItem[];
+    refundProcessedBy?: User | null;
+    rejectedBy?: User | null;
 }
 
 // Detailed Sales Report Types

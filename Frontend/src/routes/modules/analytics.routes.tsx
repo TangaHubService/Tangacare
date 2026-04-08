@@ -4,6 +4,7 @@ import { PERMISSIONS } from '../../types/auth';
 import { lazyNamed, withRouteSuspense } from '../lazy';
 
 const ReportsPage = lazyNamed(() => import('../../pages/dashboard/ReportsPage'), 'ReportsPage');
+const ReturnsPage = lazyNamed(() => import('../../pages/dashboard/ReturnsPage'), 'ReturnsPage');
 
 export const createAnalyticsRoutes = (parentRoute: any) => {
     const analyticsRoute = createRoute({
@@ -41,7 +42,7 @@ export const createAnalyticsRoutes = (parentRoute: any) => {
         path: 'intelligence',
         component: () => {
             const Nav = Navigate as any;
-            return <Nav to="/app/analytics/recall" search={{}} />;
+            return <Nav to="/app/analytics/fast-moving" search={{}} />;
         },
     });
 
@@ -63,7 +64,7 @@ export const createAnalyticsRoutes = (parentRoute: any) => {
     const analyticsReturnsRoute = createRoute({
         getParentRoute: () => analyticsRoute,
         path: 'returns',
-        component: () => withRouteSuspense(<ReportsPage defaultTab="returns" />),
+        component: () => withRouteSuspense(<ReturnsPage />),
     });
 
     const analyticsInventoryRoute = createRoute({
@@ -99,7 +100,10 @@ export const createAnalyticsRoutes = (parentRoute: any) => {
     const analyticsRecallRoute = createRoute({
         getParentRoute: () => analyticsRoute,
         path: 'recall',
-        component: () => withRouteSuspense(<ReportsPage defaultTab="recall" />),
+        component: () => {
+            const Nav = Navigate as any;
+            return <Nav to="/app/recalls" search={{}} replace />;
+        },
     });
 
     const analyticsProfitRoute = createRoute({
@@ -114,13 +118,16 @@ export const createAnalyticsRoutes = (parentRoute: any) => {
     const analyticsLowStockRoute = createRoute({
         getParentRoute: () => analyticsRoute,
         path: 'low-stock',
-        component: () => withRouteSuspense(<ReportsPage defaultTab="low-stock" />),
+        component: () => withRouteSuspense(<ReportsPage defaultTab="stock-analytics" />),
     });
 
     const analyticsMovementRoute = createRoute({
         getParentRoute: () => analyticsRoute,
         path: 'movement',
-        component: () => withRouteSuspense(<ReportsPage defaultTab="movement" />),
+        component: () => {
+            const Nav = Navigate as any;
+            return <Nav to="/app/stock-movements" search={{}} replace />;
+        },
     });
 
     const analyticsFastMovingRoute = createRoute({
@@ -144,7 +151,10 @@ export const createAnalyticsRoutes = (parentRoute: any) => {
     const analyticsNearExpiryActionsRoute = createRoute({
         getParentRoute: () => analyticsRoute,
         path: 'near-expiry-actions',
-        component: () => withRouteSuspense(<ReportsPage defaultTab="near-expiry-actions" />),
+        component: () => {
+            const Nav = Navigate as any;
+            return <Nav to="/app/recalls" search={{}} replace />;
+        },
     });
 
     const analyticsParRoute = createRoute({

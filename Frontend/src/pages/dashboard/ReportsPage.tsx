@@ -21,16 +21,13 @@ import { cn } from '../../lib/utils';
 import { formatLocalDate, parseLocalDate } from '../../lib/date';
 
 import { ReorderSuggestions } from '../../components/pharmacy/reports/ReorderSuggestions';
-import { ExpiryReport } from '../../components/pharmacy/reports/ExpiryReport';
 import { CreateReturnModal } from '../../components/pharmacy/returns/CreateReturnModal';
 import { ABCAnalysisReport } from '../../components/pharmacy/reports/ABCAnalysisReport';
 import { PurchaseReport } from '../../components/pharmacy/reports/PurchaseReport';
 import { FastSlowMovingReport } from '../../components/pharmacy/reports/FastSlowMovingReport';
 import { DemandForecastReport } from '../../components/pharmacy/reports/DemandForecastReport';
-import { NearExpiryActionsReport } from '../../components/pharmacy/reports/NearExpiryActionsReport';
 import { ForecastReorderReport } from '../../components/pharmacy/reports/ForecastReorderReport';
 import { ParReplenishmentReport } from '../../components/pharmacy/reports/ParReplenishmentReport';
-import { StockMovementsPage } from './StockMovementsPage';
 import type { Medicine } from '../../types/pharmacy';
 import { toast } from 'react-hot-toast';
 
@@ -41,11 +38,7 @@ export interface ReportsPageProps {
 const VALID_REPORT_TABS = new Set([
     'sales',
     'stock',
-    'low-stock',
-    'movement',
     'purchase',
-    'expiry',
-    'near-expiry-actions',
     'fast-moving',
     'demand-forecast',
     'forecast-reorder',
@@ -56,12 +49,8 @@ const VALID_REPORT_TABS = new Set([
 ]);
 
 const SUBTAB_ALIASES: Record<string, string> = {
-    returns: 'sales',
     profit: 'sales',
-    reorder: 'low-stock',
-    recall: 'expiry',
-    'stock-movement': 'movement',
-    'stock-movements-history': 'movement',
+    reorder: 'stock-analytics',
     procurement: 'purchase',
     staff: 'performance',
     loyalty: 'customer',
@@ -78,31 +67,45 @@ function normalizeSubtab(tab: string): string {
 function resolveReportTab(defaultTab: string): string {
     const n = normalizeSubtab(defaultTab);
     if (n === 'operations') return 'sales';
-    if (n === 'inventory-intelligence') return 'expiry';
+    if (n === 'stock-analytics') return 'stock';
+    if (n === 'inventory-intelligence') return 'fast-moving';
     if (n === 'business-compliance') return 'performance';
     if (VALID_REPORT_TABS.has(n)) return n;
     return 'sales';
 }
 
-const EXPIRY_WINDOW_PRESETS = [30, 60, 90, 120, 180] as const;
-const NEAR_EXPIRY_HORIZON_PRESETS = [30, 45, 60, 90, 100, 110, 120, 180, 365] as const;
+type SalesReportView = 'general' | 'purchase-vs-sales' | 'medicine-margin';
+type StockReportView = 'general' | 'analytics';
+
+const SALES_REPORT_VIEW_LABELS: Record<SalesReportView, string> = {
+    general: 'General Sales',
+    'purchase-vs-sales': 'Purchase vs Sales',
+    'medicine-margin': 'Medicine Margin',
+};
+
+const STOCK_REPORT_VIEW_LABELS: Record<StockReportView, string> = {
+    general: 'General Stock Report',
+    analytics: 'Stock Analytics',
+};
+
+function resolveStockView(defaultTab: string): StockReportView {
+    return normalizeSubtab(defaultTab) === 'stock-analytics' ? 'analytics' : 'general';
+}
 
 export function ReportsPage({ defaultTab = 'sales' }: ReportsPageProps) {
     const [startDate, setStartDate] = useState(format(subDays(new Date(), 30), 'yyyy-MM-dd'));
     const [endDate, setEndDate] = useState(format(new Date(), 'yyyy-MM-dd'));
+    const [salesView, setSalesView] = useState<SalesReportView>('general');
+    const [stockView, setStockView] = useState<StockReportView>(() => resolveStockView(defaultTab));
     const { user, facilityId } = useAuth();
     const effectiveFacilityId = facilityId ?? user?.facility_id;
 
     const SUBTAB_LABELS: Record<string, string> = {
         sales: 'Sales',
         stock: 'Stock',
-        'low-stock': 'Low Stock',
-        expiry: 'Expiry',
-        movement: 'Movements',
         'fast-moving': 'Fast/Slow',
         'demand-forecast': 'Demand Forecast',
         'forecast-reorder': 'Forecast Reorder',
-        'near-expiry-actions': 'Near-Expiry Actions',
         par: 'PAR Replenishment',
         purchase: 'Purchase',
         performance: 'Performance',
@@ -112,46 +115,46 @@ export function ReportsPage({ defaultTab = 'sales' }: ReportsPageProps) {
 
     const resolvedTab = useMemo(() => resolveReportTab(defaultTab), [defaultTab]);
 
-    const [expiryDays, setExpiryDays] = useState(30);
-    const [nearExpiryActionDays, setNearExpiryActionDays] = useState(90);
+    useEffect(() => {
+        if (resolvedTab !== 'sales') {
+            setSalesView('general');
+        }
+    }, [resolvedTab]);
 
-    const expiryWindowSelectOptions = useMemo(() => {
-        const merged = new Set<number>([...EXPIRY_WINDOW_PRESETS, expiryDays]);
-        return Array.from(merged).sort((a, b) => a - b);
-    }, [expiryDays]);
-
-    const nearExpiryHorizonSelectOptions = useMemo(() => {
-        const merged = new Set<number>([...NEAR_EXPIRY_HORIZON_PRESETS, nearExpiryActionDays]);
-        return Array.from(merged).sort((a, b) => a - b);
-    }, [nearExpiryActionDays]);
+    useEffect(() => {
+        if (resolvedTab === 'stock') {
+            setStockView(resolveStockView(defaultTab));
+        } else {
+            setStockView('general');
+        }
+    }, [defaultTab, resolvedTab]);
 
     const getExportType = (
         tab: string,
+        activeSalesView: SalesReportView,
     ):
         | 'sales'
+        | 'purchase-vs-sales'
+        | 'medicine-margin'
         | 'stock'
-        | 'low-stock'
-        | 'expiry'
-        | 'movement'
         | 'fast-moving'
         | 'demand-forecast'
         | 'forecast-reorder'
-        | 'near-expiry-actions'
         | 'par'
         | 'purchase'
         | 'performance'
         | 'customer'
         | 'tax'
         | null => {
-        if (tab === 'sales') return 'sales';
+        if (tab === 'sales') {
+            if (activeSalesView === 'purchase-vs-sales') return 'purchase-vs-sales';
+            if (activeSalesView === 'medicine-margin') return 'medicine-margin';
+            return 'sales';
+        }
         if (tab === 'stock') return 'stock';
-        if (tab === 'low-stock') return 'low-stock';
-        if (tab === 'expiry') return 'expiry';
-        if (tab === 'movement') return 'movement';
         if (tab === 'fast-moving') return 'fast-moving';
         if (tab === 'demand-forecast') return 'demand-forecast';
         if (tab === 'forecast-reorder') return 'forecast-reorder';
-        if (tab === 'near-expiry-actions') return 'near-expiry-actions';
         if (tab === 'par') return 'par';
         if (tab === 'purchase') return 'purchase';
         if (tab === 'performance') return 'performance';
@@ -160,7 +163,7 @@ export function ReportsPage({ defaultTab = 'sales' }: ReportsPageProps) {
         return null;
     };
 
-    const exportType = getExportType(resolvedTab);
+    const exportType = getExportType(resolvedTab, salesView);
     const canExport = exportType !== null;
 
     const handleExport = async (format: 'excel' | 'pdf') => {
@@ -170,11 +173,19 @@ export function ReportsPage({ defaultTab = 'sales' }: ReportsPageProps) {
         }
 
         const params: any = { facilityId: effectiveFacilityId };
-        if (['sales', 'purchase', 'performance', 'tax'].includes(exportType)) {
+        if (
+            [
+                'sales',
+                'purchase-vs-sales',
+                'medicine-margin',
+                'purchase',
+                'performance',
+                'tax',
+            ].includes(exportType)
+        ) {
             params.start_date = startDate;
             params.end_date = endDate;
         }
-        if (exportType === 'expiry') params.days = expiryDays;
         if (exportType === 'fast-moving') params.days = 90;
         if (exportType === 'demand-forecast') {
             params.horizon_days = 30;
@@ -182,9 +193,6 @@ export function ReportsPage({ defaultTab = 'sales' }: ReportsPageProps) {
         }
         if (exportType === 'forecast-reorder') {
             params.horizon_days = 30;
-        }
-        if (exportType === 'near-expiry-actions') {
-            params.horizon_days = nearExpiryActionDays;
         }
         if (exportType === 'par') {
             params.status = 'pending';
@@ -223,54 +231,6 @@ export function ReportsPage({ defaultTab = 'sales' }: ReportsPageProps) {
                                 {SUBTAB_LABELS[resolvedTab] || resolvedTab}
                             </span>
                         </h1>
-                        {resolvedTab === 'expiry' && (
-                            <label className="flex shrink-0 items-center gap-2">
-                                <span className="whitespace-nowrap text-[10px] font-black uppercase tracking-widest text-slate-500 dark:text-slate-400">
-                                    Near days
-                                </span>
-                                <select
-                                    value={String(expiryDays)}
-                                    onChange={(e) => {
-                                        const raw = parseInt(e.target.value, 10);
-                                        const n = Number.isFinite(raw)
-                                            ? Math.min(730, Math.max(1, raw))
-                                            : 30;
-                                        setExpiryDays(n);
-                                    }}
-                                    className="h-[42px] min-w-[120px] shrink-0 rounded-xl border border-slate-200 bg-white px-3 text-xs font-black uppercase tracking-wider text-slate-700 focus:outline-none focus:ring-2 focus:ring-healthcare-primary/30 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200"
-                                >
-                                    {expiryWindowSelectOptions.map((d) => (
-                                        <option key={d} value={d}>
-                                            {d} days
-                                        </option>
-                                    ))}
-                                </select>
-                            </label>
-                        )}
-                        {resolvedTab === 'near-expiry-actions' && (
-                            <label className="flex shrink-0 items-center gap-2">
-                                <span className="whitespace-nowrap text-[10px] font-black uppercase tracking-widest text-slate-500 dark:text-slate-400">
-                                    Near days
-                                </span>
-                                <select
-                                    value={String(nearExpiryActionDays)}
-                                    onChange={(e) => {
-                                        const raw = parseInt(e.target.value, 10);
-                                        const n = Number.isFinite(raw)
-                                            ? Math.min(730, Math.max(1, raw))
-                                            : 90;
-                                        setNearExpiryActionDays(n);
-                                    }}
-                                    className="h-[42px] min-w-[120px] shrink-0 rounded-xl border border-slate-200 bg-white px-3 text-xs font-black uppercase tracking-wider text-slate-700 focus:outline-none focus:ring-2 focus:ring-healthcare-primary/30 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200"
-                                >
-                                    {nearExpiryHorizonSelectOptions.map((d) => (
-                                        <option key={d} value={d}>
-                                            {d} days
-                                        </option>
-                                    ))}
-                                </select>
-                            </label>
-                        )}
                     </div>
                     <div className="ml-auto flex shrink-0 gap-2">
                         <button
@@ -302,37 +262,88 @@ export function ReportsPage({ defaultTab = 'sales' }: ReportsPageProps) {
 
                 {/* Date / day pickers (conditionally shown) */}
                 {['sales', 'tax', 'performance', 'purchase'].includes(resolvedTab) && (
-                    <div className="flex items-center gap-2 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-lg px-3 py-1.5 shadow-sm w-fit">
-                        <Calendar size={14} className="text-slate-400" />
-                        <input
-                            type="date"
-                            value={startDate}
-                            onChange={(e) => setStartDate(e.target.value)}
-                            className="bg-transparent text-sm font-bold text-slate-600 dark:text-slate-300 outline-none"
-                        />
-                        <span className="text-slate-300 px-1">—</span>
-                        <input
-                            type="date"
-                            value={endDate}
-                            onChange={(e) => setEndDate(e.target.value)}
-                            className="bg-transparent text-sm font-bold text-slate-600 dark:text-slate-300 outline-none"
-                        />
+                    <div
+                        className={cn(
+                            'flex flex-col gap-3',
+                            resolvedTab === 'sales'
+                                ? 'lg:flex-row lg:items-center lg:justify-between'
+                                : 'lg:flex-row lg:items-center lg:justify-end',
+                        )}
+                    >
+                        {resolvedTab === 'sales' ? (
+                            <div className="inline-flex w-fit flex-wrap items-center gap-1 rounded-2xl bg-white p-1 dark:bg-slate-900">
+                                {(Object.entries(SALES_REPORT_VIEW_LABELS) as Array<
+                                    [SalesReportView, string]
+                                >).map(([value, label]) => (
+                                    <button
+                                        key={value}
+                                        onClick={() => setSalesView(value)}
+                                        className={cn(
+                                            'rounded-xl px-4 py-2 text-[11px] font-black uppercase tracking-widest transition-colors',
+                                            salesView === value
+                                                ? 'bg-healthcare-primary text-white shadow-sm'
+                                                : 'text-slate-500 hover:bg-slate-100 hover:text-healthcare-dark dark:text-slate-300 dark:hover:bg-slate-800 dark:hover:text-white',
+                                        )}
+                                    >
+                                        {label}
+                                    </button>
+                                ))}
+                            </div>
+                        ) : null}
+
+                        <div className="flex items-center gap-2 bg-white dark:bg-slate-900 rounded-lg px-3 py-1.5 w-fit lg:ml-auto">
+                            <Calendar size={14} className="text-slate-400" />
+                            <input
+                                type="date"
+                                value={startDate}
+                                onChange={(e) => setStartDate(e.target.value)}
+                                className="bg-transparent text-sm font-bold text-slate-600 dark:text-slate-300 outline-none"
+                            />
+                            <span className="text-slate-300 px-1">—</span>
+                            <input
+                                type="date"
+                                value={endDate}
+                                onChange={(e) => setEndDate(e.target.value)}
+                                className="bg-transparent text-sm font-bold text-slate-600 dark:text-slate-300 outline-none"
+                            />
+                        </div>
                     </div>
                 )}
 
-                <div className="glass-card p-6 bg-white dark:bg-slate-900 rounded-3xl border border-slate-200 dark:border-slate-800 min-h-[400px]">
+                {resolvedTab === 'stock' && (
+                    <div className="flex flex-wrap items-center justify-between gap-3">
+                        <div className="inline-flex w-fit flex-wrap items-center gap-1 rounded-2xl bg-transparent p-0">
+                            {(Object.entries(STOCK_REPORT_VIEW_LABELS) as Array<
+                                [StockReportView, string]
+                            >).map(([value, label]) => (
+                                <button
+                                    key={value}
+                                    onClick={() => setStockView(value)}
+                                    className={cn(
+                                        'rounded-xl px-4 py-2 text-[11px] font-black uppercase tracking-widest transition-colors',
+                                        stockView === value
+                                            ? 'bg-healthcare-primary text-white shadow-sm'
+                                            : 'text-slate-500 hover:bg-slate-100 hover:text-healthcare-dark dark:text-slate-300 dark:hover:bg-slate-800 dark:hover:text-white',
+                                    )}
+                                >
+                                    {label}
+                                </button>
+                            ))}
+                        </div>
+                    </div>
+                )}
+
+                <div className="min-h-[400px] space-y-6 bg-transparent p-0">
                     {resolvedTab === 'sales' && (
                         <SalesReports
                             facilityId={effectiveFacilityId}
                             startDate={startDate}
                             endDate={endDate}
+                            view={salesView}
                         />
                     )}
-                    {resolvedTab === 'stock' && <StockReports facilityId={effectiveFacilityId} />}
-                    {resolvedTab === 'low-stock' && (
-                        <div className="w-full">
-                            <ReorderSuggestions />
-                        </div>
+                    {resolvedTab === 'stock' && (
+                        <StockReports facilityId={effectiveFacilityId} view={stockView} />
                     )}
                     {resolvedTab === 'fast-moving' && (
                         <FastSlowMovingReport facilityId={effectiveFacilityId} />
@@ -340,25 +351,11 @@ export function ReportsPage({ defaultTab = 'sales' }: ReportsPageProps) {
                     {resolvedTab === 'demand-forecast' && (
                         <DemandForecastReport facilityId={effectiveFacilityId} />
                     )}
-                    {resolvedTab === 'near-expiry-actions' && (
-                        <NearExpiryActionsReport
-                            facilityId={effectiveFacilityId}
-                            horizonDays={nearExpiryActionDays}
-                        />
-                    )}
                     {resolvedTab === 'forecast-reorder' && (
                         <ForecastReorderReport facilityId={effectiveFacilityId} />
                     )}
                     {resolvedTab === 'par' && (
                         <ParReplenishmentReport facilityId={effectiveFacilityId} />
-                    )}
-                    {resolvedTab === 'expiry' && (
-                        <ExpiryReport facilityId={effectiveFacilityId} selectedDays={expiryDays} />
-                    )}
-                    {resolvedTab === 'movement' && (
-                        <div className="-mx-6 -my-6">
-                            <StockMovementsPage />
-                        </div>
                     )}
                     {resolvedTab === 'tax' && (
                         <TaxReports
@@ -624,10 +621,12 @@ function SalesReports({
     facilityId,
     startDate,
     endDate,
+    view,
 }: {
     facilityId?: number;
     startDate?: string;
     endDate?: string;
+    view: SalesReportView;
 }) {
     const [loading, setLoading] = useState(false);
     const [sales, setSales] = useState<any | null>(null);
@@ -692,6 +691,74 @@ function SalesReports({
         load();
     }, [facilityId, startDate, endDate]);
 
+    const formatReportCurrency = (value: number) =>
+        `RWF ${Math.round(Number(value || 0)).toLocaleString()}`;
+
+    const groupedSalesTransactions = useMemo(() => {
+        const grouped = sales?.transactions?.reduce((acc: any, t: any) => {
+            if (!acc[t.transaction_number]) {
+                acc[t.transaction_number] = {
+                    ...t,
+                    medicines: [t.medicine_name],
+                    total: t.total_amount,
+                    items: [t],
+                };
+            } else {
+                acc[t.transaction_number].medicines.push(t.medicine_name);
+                acc[t.transaction_number].total += t.total_amount;
+                acc[t.transaction_number].items.push(t);
+            }
+            return acc;
+        }, {});
+
+        return Object.values(grouped || {});
+    }, [sales]);
+
+    const purchaseVsSalesTimeline = useMemo(
+        () => (Array.isArray(purchaseVsSales?.timeline) ? purchaseVsSales.timeline : []),
+        [purchaseVsSales],
+    );
+
+    const purchaseVsSalesSummary = useMemo(() => {
+        const purchaseAmount = Number(purchaseVsSales?.totals?.purchase_amount || 0);
+        const salesAmount = Number(purchaseVsSales?.totals?.sales_amount || 0);
+        const varianceAmount = Number(purchaseVsSales?.totals?.variance_amount || 0);
+        const salesCoverage = purchaseAmount > 0 ? (salesAmount / purchaseAmount) * 100 : 0;
+
+        return {
+            purchaseAmount,
+            salesAmount,
+            varianceAmount,
+            salesCoverage,
+        };
+    }, [purchaseVsSales]);
+
+    const medicineMarginItems = useMemo(
+        () => (Array.isArray(medicineMargin?.items) ? medicineMargin.items : []),
+        [medicineMargin],
+    );
+
+    const medicineMarginSummary = useMemo(() => {
+        const totalRevenue = medicineMarginItems.reduce(
+            (sum: number, row: any) => sum + Number(row.revenue || 0),
+            0,
+        );
+        const totalCogs = medicineMarginItems.reduce(
+            (sum: number, row: any) => sum + Number(row.cogs || 0),
+            0,
+        );
+        const totalProfit = totalRevenue - totalCogs;
+        const averageMargin = totalRevenue > 0 ? (totalProfit / totalRevenue) * 100 : 0;
+
+        return {
+            totalRevenue,
+            totalCogs,
+            totalProfit,
+            averageMargin,
+            itemCount: medicineMarginItems.length,
+        };
+    }, [medicineMarginItems]);
+
     if (loading)
         return (
             <SkeletonTable
@@ -706,291 +773,359 @@ function SalesReports({
 
     return (
         <div className="space-y-6">
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-                <SummaryCard
-                    title="Gross profit"
-                    value={`RWF ${Number(profit?.profit || 0).toLocaleString()}`}
-                    trend="—"
-                    icon={<TrendingUp size={20} />}
-                />
-                <SummaryCard
-                    title="Profit Margin"
-                    value={`${(Number(profit?.profit_margin || 0) * 100).toFixed(1)}%`}
-                    trend="—"
-                    icon={<Activity size={20} />}
-                />
-                <SummaryCard
-                    title="Total Revenue"
-                    value={`RWF ${Number(profit?.revenue || 0).toLocaleString()}`}
-                    trend="—"
-                    icon={<DollarSign size={20} />}
-                />
-            </div>
-
-            <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
-                <div className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-slate-50/60 dark:bg-slate-900/60 p-4 space-y-3">
-                    <div className="flex items-center justify-between gap-3">
-                        <h3 className="text-sm font-black uppercase tracking-wide text-slate-700 dark:text-slate-200">
-                            Purchase vs Sales
-                        </h3>
-                        <div className="flex gap-2">
-                            <button
-                                onClick={() =>
-                                    pharmacyService.downloadReport('purchase-vs-sales', 'excel', {
-                                        start_date: startDate,
-                                        end_date: endDate,
-                                    })
-                                }
-                                className="px-2.5 py-1 rounded-md text-[10px] font-black uppercase bg-emerald-100 text-emerald-700 hover:bg-emerald-200"
-                            >
-                                Excel
-                            </button>
-                            <button
-                                onClick={() =>
-                                    pharmacyService.downloadReport('purchase-vs-sales', 'pdf', {
-                                        start_date: startDate,
-                                        end_date: endDate,
-                                    })
-                                }
-                                className="px-2.5 py-1 rounded-md text-[10px] font-black uppercase bg-rose-100 text-rose-700 hover:bg-rose-200"
-                            >
-                                PDF
-                            </button>
-                        </div>
+            {view === 'general' && (
+                <>
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                        <SummaryCard
+                            title="Gross profit"
+                            value={`RWF ${Number(profit?.profit || 0).toLocaleString()}`}
+                            trend="—"
+                            icon={<TrendingUp size={20} />}
+                        />
+                        <SummaryCard
+                            title="Profit Margin"
+                            value={`${(Number(profit?.profit_margin || 0) * 100).toFixed(1)}%`}
+                            trend="—"
+                            icon={<Activity size={20} />}
+                        />
+                        <SummaryCard
+                            title="Total Revenue"
+                            value={`RWF ${Number(profit?.revenue || 0).toLocaleString()}`}
+                            trend="—"
+                            icon={<DollarSign size={20} />}
+                        />
                     </div>
-                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                        <div className="rounded-xl bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-800 p-3">
-                            <p className="text-[10px] font-black uppercase text-slate-400">
+
+                    <div className="overflow-x-auto bg-white dark:bg-slate-900 rounded-2xl border border-slate-100 dark:border-slate-800">
+                        <table className="tc-table w-full text-left text-sm">
+                            <thead className="bg-slate-50 dark:bg-slate-800/50">
+                                <tr className="text-[10px] uppercase tracking-wider text-slate-400">
+                                    <th className="px-6 py-3 font-semibold">Date</th>
+                                    <th className="px-6 py-3 font-semibold">Receipt #</th>
+                                    <th className="px-6 py-3 font-semibold">Medicine</th>
+                                    <th className="px-6 py-3 font-semibold text-right">Qty</th>
+                                    <th className="px-6 py-3 font-semibold text-right">Total</th>
+                                    <th className="px-6 py-3"></th>
+                                </tr>
+                            </thead>
+                            <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+                                {groupedSalesTransactions.map((t: any) => (
+                                    <tr
+                                        key={t.transaction_number}
+                                        className="hover:bg-slate-50 transition-colors"
+                                    >
+                                        <td className="px-6 py-4 text-xs font-bold text-slate-500">
+                                            {formatLocalDate(t.date)}
+                                        </td>
+                                        <td className="px-6 py-4 font-black text-healthcare-primary text-xs tracking-tighter uppercase">
+                                            {t.transaction_number}
+                                        </td>
+                                        <td className="px-6 py-4 font-black text-healthcare-dark dark:text-white">
+                                            <div className="flex flex-col">
+                                                <span>{t.medicines[0]}</span>
+                                                {t.medicines.length > 1 && (
+                                                    <span className="text-[10px] text-slate-400">
+                                                        + {t.medicines.length - 1} more items
+                                                    </span>
+                                                )}
+                                            </div>
+                                        </td>
+                                        <td className="px-6 py-4 text-right text-slate-500">
+                                            {t.items.reduce(
+                                                (sum: number, item: any) => sum + item.quantity,
+                                                0,
+                                            )}
+                                        </td>
+                                        <td className="px-6 py-4 text-right font-black text-healthcare-primary">
+                                            RWF {t.total.toLocaleString()}
+                                        </td>
+                                        <td className="px-6 py-4 text-right">
+                                            <div className="flex gap-2 justify-end">
+                                                <button
+                                                    onClick={async () => {
+                                                        if (facilityId) {
+                                                            await pharmacyService.getSaleReceipt(
+                                                                t.sale_id,
+                                                                facilityId,
+                                                            );
+                                                        }
+                                                    }}
+                                                    className="flex items-center gap-1.5 px-3 py-1.5 bg-blue-50 text-blue-600 rounded-lg text-[10px] font-black uppercase hover:bg-blue-100 transition-colors border border-blue-100"
+                                                >
+                                                    <Download size={12} /> Receipt
+                                                </button>
+                                                <button
+                                                    onClick={async () => {
+                                                        const details =
+                                                            await pharmacyService.getSale(t.sale_id);
+                                                        setSelectedSale(details);
+                                                        setIsReturnModalOpen(true);
+                                                    }}
+                                                    className="flex items-center gap-1.5 px-3 py-1.5 bg-rose-50 text-rose-600 rounded-lg text-[10px] font-black uppercase hover:bg-rose-100 transition-colors border border-rose-100"
+                                                >
+                                                    <RotateCcw size={12} /> Return
+                                                </button>
+                                            </div>
+                                        </td>
+                                    </tr>
+                                ))}
+                            </tbody>
+                        </table>
+                    </div>
+                </>
+            )}
+
+            {view === 'purchase-vs-sales' && (
+                <div className="space-y-5">
+                    <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-4">
+                        <div className="rounded-2xl border border-slate-200/80 bg-white/90 p-4 dark:border-slate-800 dark:bg-slate-950/70">
+                            <p className="text-[10px] font-black uppercase tracking-[0.22em] text-slate-400">
                                 Purchases
                             </p>
-                            <p className="text-sm font-black text-slate-700 dark:text-slate-100">
-                                RWF{' '}
-                                {Number(
-                                    purchaseVsSales?.totals?.purchase_amount || 0,
-                                ).toLocaleString()}
+                            <p className="mt-2 text-lg font-black text-slate-800 dark:text-slate-50">
+                                {formatReportCurrency(purchaseVsSalesSummary.purchaseAmount)}
+                            </p>
+                            <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+                                Total procurement value
                             </p>
                         </div>
-                        <div className="rounded-xl bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-800 p-3">
-                            <p className="text-[10px] font-black uppercase text-slate-400">Sales</p>
-                            <p className="text-sm font-black text-slate-700 dark:text-slate-100">
-                                RWF{' '}
-                                {Number(
-                                    purchaseVsSales?.totals?.sales_amount || 0,
-                                ).toLocaleString()}
+                        <div className="rounded-2xl border border-slate-200/80 bg-white/90 p-4 dark:border-slate-800 dark:bg-slate-950/70">
+                            <p className="text-[10px] font-black uppercase tracking-[0.22em] text-slate-400">
+                                Sales
+                            </p>
+                            <p className="mt-2 text-lg font-black text-emerald-600 dark:text-emerald-300">
+                                {formatReportCurrency(purchaseVsSalesSummary.salesAmount)}
+                            </p>
+                            <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+                                Revenue generated
                             </p>
                         </div>
-                        <div className="rounded-xl bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-800 p-3">
-                            <p className="text-[10px] font-black uppercase text-slate-400">
+                        <div className="rounded-2xl border border-slate-200/80 bg-white/90 p-4 dark:border-slate-800 dark:bg-slate-950/70">
+                            <p className="text-[10px] font-black uppercase tracking-[0.22em] text-slate-400">
                                 Variance
                             </p>
-                            <p className="text-sm font-black text-slate-700 dark:text-slate-100">
-                                RWF{' '}
-                                {Number(
-                                    purchaseVsSales?.totals?.variance_amount || 0,
-                                ).toLocaleString()}
+                            <p
+                                className={cn(
+                                    'mt-2 text-lg font-black',
+                                    purchaseVsSalesSummary.varianceAmount >= 0
+                                        ? 'text-sky-600 dark:text-sky-300'
+                                        : 'text-rose-600 dark:text-rose-300',
+                                )}
+                            >
+                                {formatReportCurrency(purchaseVsSalesSummary.varianceAmount)}
+                            </p>
+                            <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+                                Sales minus purchases
+                            </p>
+                        </div>
+                        <div className="rounded-2xl border border-slate-200/80 bg-white/90 p-4 dark:border-slate-800 dark:bg-slate-950/70">
+                            <p className="text-[10px] font-black uppercase tracking-[0.22em] text-slate-400">
+                                Sales Coverage
+                            </p>
+                            <p className="mt-2 text-lg font-black text-violet-600 dark:text-violet-300">
+                                {purchaseVsSalesSummary.salesCoverage.toFixed(1)}%
+                            </p>
+                            <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+                                Revenue vs procurement cost
                             </p>
                         </div>
                     </div>
-                    <div className="max-h-56 overflow-auto rounded-xl border border-slate-200 dark:border-slate-800">
-                        <table className="tc-table w-full text-xs">
-                            <thead className="bg-white dark:bg-slate-900 sticky top-0">
-                                <tr className="text-slate-400 uppercase">
-                                    <th className="px-3 py-2 text-left">Date</th>
-                                    <th className="px-3 py-2 text-right">Purchase</th>
-                                    <th className="px-3 py-2 text-right">Sales</th>
-                                    <th className="px-3 py-2 text-right">Variance</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                {(purchaseVsSales?.timeline || []).slice(0, 20).map((row: any) => (
-                                    <tr
-                                        key={row.date}
-                                        className="border-t border-slate-100 dark:border-slate-800"
-                                    >
-                                        <td className="px-3 py-2 text-slate-600 dark:text-slate-200">
-                                            {row.date}
-                                        </td>
-                                        <td className="px-3 py-2 text-right text-slate-600 dark:text-slate-200">
-                                            {Number(row.purchase_amount || 0).toLocaleString()}
-                                        </td>
-                                        <td className="px-3 py-2 text-right text-slate-600 dark:text-slate-200">
-                                            {Number(row.sales_amount || 0).toLocaleString()}
-                                        </td>
-                                        <td className="px-3 py-2 text-right font-bold text-slate-700 dark:text-slate-100">
-                                            {Number(row.variance_amount || 0).toLocaleString()}
-                                        </td>
-                                    </tr>
-                                ))}
-                            </tbody>
-                        </table>
-                    </div>
-                </div>
 
-                <div className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-slate-50/60 dark:bg-slate-900/60 p-4 space-y-3">
-                    <div className="flex items-center justify-between gap-3">
-                        <h3 className="text-sm font-black uppercase tracking-wide text-slate-700 dark:text-slate-200">
-                            Medicine Margin
-                        </h3>
-                        <div className="flex gap-2">
-                            <button
-                                onClick={() =>
-                                    pharmacyService.downloadReport('medicine-margin', 'excel', {
-                                        start_date: startDate,
-                                        end_date: endDate,
-                                    })
-                                }
-                                className="px-2.5 py-1 rounded-md text-[10px] font-black uppercase bg-emerald-100 text-emerald-700 hover:bg-emerald-200"
-                            >
-                                Excel
-                            </button>
-                            <button
-                                onClick={() =>
-                                    pharmacyService.downloadReport('medicine-margin', 'pdf', {
-                                        start_date: startDate,
-                                        end_date: endDate,
-                                    })
-                                }
-                                className="px-2.5 py-1 rounded-md text-[10px] font-black uppercase bg-rose-100 text-rose-700 hover:bg-rose-200"
-                            >
-                                PDF
-                            </button>
+                    <div className="overflow-hidden rounded-[28px]">
+                        <div className="max-h-[560px] overflow-auto border border-slate-100 dark:border-slate-800 rounded-[24px]">
+                            <table className="tc-table min-w-full text-xs">
+                                <thead className="sticky top-0 bg-slate-50/95 backdrop-blur dark:bg-slate-900/95">
+                                    <tr className="text-slate-400 uppercase">
+                                        <th className="px-4 py-3 text-left">Date</th>
+                                        <th className="px-4 py-3 text-right">Purchase</th>
+                                        <th className="px-4 py-3 text-right">Sales</th>
+                                        <th className="px-4 py-3 text-right">Variance</th>
+                                    </tr>
+                                </thead>
+                                <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+                                    {purchaseVsSalesTimeline.length === 0 ? (
+                                        <tr
+                                            className="bg-white dark:bg-slate-950"
+                                        >
+                                            <td
+                                                colSpan={4}
+                                                className="px-4 py-14 text-center text-sm font-bold text-slate-500 dark:text-slate-400"
+                                            >
+                                                No purchase vs sales data found for this date range.
+                                            </td>
+                                        </tr>
+                                    ) : (
+                                        purchaseVsSalesTimeline.map((row: any) => (
+                                            <tr
+                                                key={row.date}
+                                                className="bg-white transition-colors hover:bg-slate-50 dark:bg-slate-950 dark:hover:bg-slate-900/70"
+                                            >
+                                                <td className="px-4 py-3 font-semibold text-slate-700 dark:text-slate-100">
+                                                    {row.date}
+                                                </td>
+                                                <td className="px-4 py-3 text-right text-slate-600 dark:text-slate-300">
+                                                    {formatReportCurrency(
+                                                        Number(row.purchase_amount || 0),
+                                                    )}
+                                                </td>
+                                                <td className="px-4 py-3 text-right font-bold text-emerald-600 dark:text-emerald-300">
+                                                    {formatReportCurrency(
+                                                        Number(row.sales_amount || 0),
+                                                    )}
+                                                </td>
+                                                <td
+                                                    className={cn(
+                                                        'px-4 py-3 text-right font-black',
+                                                        Number(row.variance_amount || 0) >= 0
+                                                            ? 'text-sky-600 dark:text-sky-300'
+                                                            : 'text-rose-600 dark:text-rose-300',
+                                                    )}
+                                                >
+                                                    {formatReportCurrency(
+                                                        Number(row.variance_amount || 0),
+                                                    )}
+                                                </td>
+                                            </tr>
+                                        ))
+                                    )}
+                                </tbody>
+                            </table>
                         </div>
                     </div>
-                    <div className="max-h-72 overflow-auto rounded-xl border border-slate-200 dark:border-slate-800">
-                        <table className="tc-table w-full text-xs">
-                            <thead className="bg-white dark:bg-slate-900 sticky top-0">
-                                <tr className="text-slate-400 uppercase">
-                                    <th className="px-3 py-2 text-left">Medicine</th>
-                                    <th className="px-3 py-2 text-right">Qty</th>
-                                    <th className="px-3 py-2 text-right">Revenue</th>
-                                    <th className="px-3 py-2 text-right">COGS</th>
-                                    <th className="px-3 py-2 text-right">Margin</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                {(medicineMargin?.items || []).slice(0, 20).map((row: any) => (
-                                    <tr
-                                        key={row.medicine_id}
-                                        className="border-t border-slate-100 dark:border-slate-800"
-                                    >
-                                        <td className="px-3 py-2 font-semibold text-slate-700 dark:text-slate-100">
-                                            {row.medicine_name}
-                                        </td>
-                                        <td className="px-3 py-2 text-right text-slate-600 dark:text-slate-200">
-                                            {Number(row.quantity_sold || 0).toLocaleString()}
-                                        </td>
-                                        <td className="px-3 py-2 text-right text-slate-600 dark:text-slate-200">
-                                            {Number(row.revenue || 0).toLocaleString()}
-                                        </td>
-                                        <td className="px-3 py-2 text-right text-slate-600 dark:text-slate-200">
-                                            {Number(row.cogs || 0).toLocaleString()}
-                                        </td>
-                                        <td className="px-3 py-2 text-right font-bold text-slate-700 dark:text-slate-100">
-                                            {Number(row.profit_margin_percent || 0).toFixed(1)}%
-                                        </td>
+                </div>
+            )}
+
+            {view === 'medicine-margin' && (
+                <div className="space-y-5">
+                    <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-4">
+                        <div className="rounded-2xl border border-slate-200/80 bg-white/90 p-4 dark:border-slate-800 dark:bg-slate-950/70">
+                            <p className="text-[10px] font-black uppercase tracking-[0.22em] text-slate-400">
+                                Revenue
+                            </p>
+                            <p className="mt-2 text-lg font-black text-slate-800 dark:text-slate-50">
+                                {formatReportCurrency(medicineMarginSummary.totalRevenue)}
+                            </p>
+                            <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+                                Total medicine revenue
+                            </p>
+                        </div>
+                        <div className="rounded-2xl border border-slate-200/80 bg-white/90 p-4 dark:border-slate-800 dark:bg-slate-950/70">
+                            <p className="text-[10px] font-black uppercase tracking-[0.22em] text-slate-400">
+                                COGS
+                            </p>
+                            <p className="mt-2 text-lg font-black text-amber-600 dark:text-amber-300">
+                                {formatReportCurrency(medicineMarginSummary.totalCogs)}
+                            </p>
+                            <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+                                Cost of goods sold
+                            </p>
+                        </div>
+                        <div className="rounded-2xl border border-slate-200/80 bg-white/90 p-4 dark:border-slate-800 dark:bg-slate-950/70">
+                            <p className="text-[10px] font-black uppercase tracking-[0.22em] text-slate-400">
+                                Gross Profit
+                            </p>
+                            <p className="mt-2 text-lg font-black text-emerald-600 dark:text-emerald-300">
+                                {formatReportCurrency(medicineMarginSummary.totalProfit)}
+                            </p>
+                            <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+                                Revenue minus COGS
+                            </p>
+                        </div>
+                        <div className="rounded-2xl border border-slate-200/80 bg-white/90 p-4 dark:border-slate-800 dark:bg-slate-950/70">
+                            <p className="text-[10px] font-black uppercase tracking-[0.22em] text-slate-400">
+                                Avg Margin
+                            </p>
+                            <p className="mt-2 text-lg font-black text-violet-600 dark:text-violet-300">
+                                {medicineMarginSummary.averageMargin.toFixed(1)}%
+                            </p>
+                            <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+                                Weighted margin rate
+                            </p>
+                        </div>
+                    </div>
+
+                    <div className="overflow-hidden rounded-[28px]">
+                        <div className="max-h-[680px] overflow-auto border border-slate-100 dark:border-slate-800 rounded-[24px]">
+                            <table className="tc-table min-w-full text-xs">
+                                <thead className="sticky top-0 bg-slate-50/95 backdrop-blur dark:bg-slate-900/95">
+                                    <tr className="text-slate-400 uppercase">
+                                        <th className="px-4 py-3 text-left">Medicine</th>
+                                        <th className="px-4 py-3 text-right">Qty</th>
+                                        <th className="px-4 py-3 text-right">Revenue</th>
+                                        <th className="px-4 py-3 text-right">COGS</th>
+                                        <th className="px-4 py-3 text-right">Profit</th>
+                                        <th className="px-4 py-3 text-right">Margin</th>
                                     </tr>
-                                ))}
-                            </tbody>
-                        </table>
+                                </thead>
+                                <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+                                    {medicineMarginItems.length === 0 ? (
+                                        <tr className="bg-white dark:bg-slate-950">
+                                            <td
+                                                colSpan={6}
+                                                className="px-4 py-14 text-center text-sm font-bold text-slate-500 dark:text-slate-400"
+                                            >
+                                                No medicine margin data found for this date range.
+                                            </td>
+                                        </tr>
+                                    ) : (
+                                        medicineMarginItems.map((row: any) => {
+                                            const profitValue =
+                                                Number(row.revenue || 0) - Number(row.cogs || 0);
+                                            const marginPercent = Number(
+                                                row.profit_margin_percent || 0,
+                                            );
+
+                                            return (
+                                                <tr
+                                                    key={row.medicine_id}
+                                                    className="bg-white transition-colors hover:bg-slate-50 dark:bg-slate-950 dark:hover:bg-slate-900/70"
+                                                >
+                                                    <td className="px-4 py-3 font-semibold text-slate-700 dark:text-slate-100">
+                                                        {row.medicine_name}
+                                                    </td>
+                                                    <td className="px-4 py-3 text-right text-slate-600 dark:text-slate-300">
+                                                        {Number(row.quantity_sold || 0).toLocaleString()}
+                                                    </td>
+                                                    <td className="px-4 py-3 text-right text-slate-600 dark:text-slate-300">
+                                                        {formatReportCurrency(Number(row.revenue || 0))}
+                                                    </td>
+                                                    <td className="px-4 py-3 text-right text-slate-600 dark:text-slate-300">
+                                                        {formatReportCurrency(Number(row.cogs || 0))}
+                                                    </td>
+                                                    <td
+                                                        className={cn(
+                                                            'px-4 py-3 text-right font-bold',
+                                                            profitValue >= 0
+                                                                ? 'text-emerald-600 dark:text-emerald-300'
+                                                                : 'text-rose-600 dark:text-rose-300',
+                                                        )}
+                                                    >
+                                                        {formatReportCurrency(profitValue)}
+                                                    </td>
+                                                    <td className="px-4 py-3 text-right">
+                                                        <span
+                                                            className={cn(
+                                                                'inline-flex min-w-[74px] justify-center rounded-full px-2.5 py-1 text-[10px] font-black',
+                                                                marginPercent >= 25
+                                                                    ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300'
+                                                                    : marginPercent >= 10
+                                                                      ? 'bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300'
+                                                                      : 'bg-rose-100 text-rose-700 dark:bg-rose-900/40 dark:text-rose-300',
+                                                            )}
+                                                        >
+                                                            {marginPercent.toFixed(1)}%
+                                                        </span>
+                                                    </td>
+                                                </tr>
+                                            );
+                                        })
+                                    )}
+                                </tbody>
+                            </table>
+                        </div>
                     </div>
                 </div>
-            </div>
-
-            <div className="overflow-x-auto bg-white dark:bg-slate-900 rounded-2xl border border-slate-100 dark:border-slate-800">
-                <table className="tc-table w-full text-left text-sm">
-                    <thead className="bg-slate-50 dark:bg-slate-800/50">
-                        <tr className="text-[10px] uppercase tracking-wider text-slate-400">
-                            <th className="px-6 py-3 font-semibold">Date</th>
-                            <th className="px-6 py-3 font-semibold">Receipt #</th>
-                            <th className="px-6 py-3 font-semibold">Medicine</th>
-                            <th className="px-6 py-3 font-semibold text-right">Qty</th>
-                            <th className="px-6 py-3 font-semibold text-right">Total</th>
-                            <th className="px-6 py-3"></th>
-                        </tr>
-                    </thead>
-                    <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
-                        {(() => {
-                            const grouped = sales?.transactions?.reduce((acc: any, t: any) => {
-                                if (!acc[t.transaction_number]) {
-                                    acc[t.transaction_number] = {
-                                        ...t,
-                                        medicines: [t.medicine_name],
-                                        total: t.total_amount,
-                                        items: [t],
-                                    };
-                                } else {
-                                    acc[t.transaction_number].medicines.push(t.medicine_name);
-                                    acc[t.transaction_number].total += t.total_amount;
-                                    acc[t.transaction_number].items.push(t);
-                                }
-                                return acc;
-                            }, {});
-
-                            return Object.values(grouped || {}).map((t: any) => (
-                                <tr
-                                    key={t.transaction_number}
-                                    className="hover:bg-slate-50 transition-colors"
-                                >
-                                    <td className="px-6 py-4 text-xs font-bold text-slate-500">
-                                        {formatLocalDate(t.date)}
-                                    </td>
-                                    <td className="px-6 py-4 font-black text-healthcare-primary text-xs tracking-tighter uppercase">
-                                        {t.transaction_number}
-                                    </td>
-                                    <td className="px-6 py-4 font-black text-healthcare-dark dark:text-white">
-                                        <div className="flex flex-col">
-                                            <span>{t.medicines[0]}</span>
-                                            {t.medicines.length > 1 && (
-                                                <span className="text-[10px] text-slate-400">
-                                                    + {t.medicines.length - 1} more items
-                                                </span>
-                                            )}
-                                        </div>
-                                    </td>
-                                    <td className="px-6 py-4 text-right text-slate-500">
-                                        {t.items.reduce(
-                                            (sum: number, item: any) => sum + item.quantity,
-                                            0,
-                                        )}
-                                    </td>
-                                    <td className="px-6 py-4 text-right font-black text-healthcare-primary">
-                                        RWF {t.total.toLocaleString()}
-                                    </td>
-                                    <td className="px-6 py-4 text-right">
-                                        <div className="flex gap-2 justify-end">
-                                            <button
-                                                onClick={async () => {
-                                                    if (facilityId) {
-                                                        await pharmacyService.getSaleReceipt(
-                                                            t.sale_id,
-                                                            facilityId,
-                                                        );
-                                                    }
-                                                }}
-                                                className="flex items-center gap-1.5 px-3 py-1.5 bg-blue-50 text-blue-600 rounded-lg text-[10px] font-black uppercase hover:bg-blue-100 transition-colors border border-blue-100"
-                                            >
-                                                <Download size={12} /> Receipt
-                                            </button>
-                                            <button
-                                                onClick={async () => {
-                                                    const details = await pharmacyService.getSale(
-                                                        t.sale_id,
-                                                    );
-                                                    setSelectedSale(details);
-                                                    setIsReturnModalOpen(true);
-                                                }}
-                                                className="flex items-center gap-1.5 px-3 py-1.5 bg-rose-50 text-rose-600 rounded-lg text-[10px] font-black uppercase hover:bg-rose-100 transition-colors border border-rose-100"
-                                            >
-                                                <RotateCcw size={12} /> Return
-                                            </button>
-                                        </div>
-                                    </td>
-                                </tr>
-                            ));
-                        })()}
-                    </tbody>
-                </table>
-            </div>
+            )}
             {isReturnModalOpen && selectedSale && (
                 <CreateReturnModal
                     sale={selectedSale}
@@ -1002,7 +1137,13 @@ function SalesReports({
     );
 }
 
-function StockReports({ facilityId }: { facilityId?: number }) {
+function StockReports({
+    facilityId,
+    view,
+}: {
+    facilityId?: number;
+    view: StockReportView;
+}) {
     type InventoryStatus = 'in_stock' | 'low_stock' | 'expiring_soon' | 'expired' | 'out_of_stock';
     type StockSummary = {
         total_medicines: number;
@@ -1023,10 +1164,8 @@ function StockReports({ facilityId }: { facilityId?: number }) {
 
     const [loading, setLoading] = useState(false);
     const [stockSummary, setStockSummary] = useState<StockSummary | null>(null);
-    const [inventoryAging, setInventoryAging] = useState<any | null>(null);
     const [medicines, setMedicines] = useState<Medicine[]>([]);
     const [lowStockMedicineIds, setLowStockMedicineIds] = useState<number[]>([]);
-    const [asOfDate, setAsOfDate] = useState(format(new Date(), 'yyyy-MM-dd'));
 
     const [searchQuery, setSearchQuery] = useState('');
     const [statusFilter, setStatusFilter] = useState<'all' | InventoryStatus>('all');
@@ -1066,11 +1205,10 @@ function StockReports({ facilityId }: { facilityId?: number }) {
                     return all;
                 };
 
-                const [summary, allMedicines, lowStockReport, agingReport] = await Promise.all([
+                const [summary, allMedicines, lowStockReport] = await Promise.all([
                     pharmacyService.getStockReport(facilityId),
                     fetchAllMedicines(facilityId),
                     pharmacyService.getLowStockReport(facilityId),
-                    pharmacyService.getInventoryAgingReport(facilityId, { as_of_date: asOfDate }),
                 ]);
 
                 if (!active) return;
@@ -1086,7 +1224,6 @@ function StockReports({ facilityId }: { facilityId?: number }) {
                 setStockSummary(summary);
                 setMedicines(allMedicines);
                 setLowStockMedicineIds(ids);
-                setInventoryAging(agingReport);
             } catch (error) {
                 console.error('Failed to load stock report details:', error);
             } finally {
@@ -1099,7 +1236,7 @@ function StockReports({ facilityId }: { facilityId?: number }) {
         return () => {
             active = false;
         };
-    }, [facilityId, asOfDate]);
+    }, [facilityId]);
 
     const lowStockIdSet = useMemo(() => new Set(lowStockMedicineIds), [lowStockMedicineIds]);
 
@@ -1312,354 +1449,344 @@ function StockReports({ facilityId }: { facilityId?: number }) {
 
     return (
         <div className="space-y-6">
-            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-5 gap-4">
-                <SummaryCard
-                    title="Total Valuation"
-                    value={`RWF ${Number(stockSummary?.total_value || 0).toLocaleString()}`}
-                    trend="Inventory value"
-                    icon={<DollarSign size={16} />}
-                />
-                <SummaryCard
-                    title="SKU Count"
-                    value={`${Number(stockSummary?.total_medicines || detailedRows.length)}`}
-                    trend="Tracked medicines"
-                    icon={<Package size={16} />}
-                    color="teal"
-                />
-                <SummaryCard
-                    title="Low Stock"
-                    value={`${Number(stockSummary?.low_stock_count || statusCounts.low_stock)}`}
-                    trend="Reorder candidates"
-                    icon={<AlertTriangle size={16} />}
-                    color="amber"
-                />
-                <SummaryCard
-                    title="Expiring / Expired"
-                    value={`${statusCounts.expiring_soon + statusCounts.expired}`}
-                    trend={`${expiryWindowDays}d window`}
-                    icon={<AlertTriangle size={16} />}
-                    color="rose"
-                />
-                <SummaryCard
-                    title="Out of Stock"
-                    value={`${statusCounts.out_of_stock}`}
-                    trend="Immediate action"
-                    icon={<Package size={16} />}
-                    color="rose"
-                />
-            </div>
-
-            <div className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-slate-50/60 dark:bg-slate-900/60 p-4 space-y-3">
-                <div className="flex items-center justify-between gap-3 flex-wrap">
-                    <h3 className="text-sm font-black uppercase tracking-wide text-slate-700 dark:text-slate-200">
-                        Inventory Aging
-                    </h3>
-                    <div className="flex items-center gap-2">
-                        <input
-                            type="date"
-                            value={asOfDate}
-                            onChange={(e) => setAsOfDate(e.target.value)}
-                            className="px-3 py-1.5 rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-xs font-semibold text-slate-700 dark:text-slate-200"
+            {view === 'general' ? (
+                <>
+                    <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-5">
+                        <SummaryCard
+                            title="Total Valuation"
+                            value={`RWF ${Number(stockSummary?.total_value || 0).toLocaleString()}`}
+                            trend="Inventory value"
+                            icon={<DollarSign size={16} />}
                         />
-                        <button
-                            onClick={() =>
-                                pharmacyService.downloadReport('inventory-aging', 'excel', {
-                                    as_of_date: asOfDate,
-                                })
-                            }
-                            className="px-2.5 py-1 rounded-md text-[10px] font-black uppercase bg-emerald-100 text-emerald-700 hover:bg-emerald-200"
-                        >
-                            Excel
-                        </button>
-                        <button
-                            onClick={() =>
-                                pharmacyService.downloadReport('inventory-aging', 'pdf', {
-                                    as_of_date: asOfDate,
-                                })
-                            }
-                            className="px-2.5 py-1 rounded-md text-[10px] font-black uppercase bg-rose-100 text-rose-700 hover:bg-rose-200"
-                        >
-                            PDF
-                        </button>
+                        <SummaryCard
+                            title="SKU Count"
+                            value={`${Number(stockSummary?.total_medicines || detailedRows.length)}`}
+                            trend="Tracked medicines"
+                            icon={<Package size={16} />}
+                            color="teal"
+                        />
+                        <SummaryCard
+                            title="Low Stock"
+                            value={`${Number(stockSummary?.low_stock_count || statusCounts.low_stock)}`}
+                            trend="Reorder candidates"
+                            icon={<AlertTriangle size={16} />}
+                            color="amber"
+                        />
+                        <SummaryCard
+                            title="Expiring / Expired"
+                            value={`${statusCounts.expiring_soon + statusCounts.expired}`}
+                            trend={`${expiryWindowDays}d window`}
+                            icon={<AlertTriangle size={16} />}
+                            color="rose"
+                        />
+                        <SummaryCard
+                            title="Out of Stock"
+                            value={`${statusCounts.out_of_stock}`}
+                            trend="Immediate action"
+                            icon={<Package size={16} />}
+                            color="rose"
+                        />
                     </div>
-                </div>
 
-                <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-                    {(inventoryAging?.buckets || []).map((bucket: any) => (
+                    <div className="space-y-4">
+                        <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-6">
+                            <div className="relative md:col-span-2 xl:col-span-2">
+                                <Search
+                                    size={16}
+                                    className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"
+                                />
+                                <input
+                                    value={searchQuery}
+                                    onChange={(e) => setSearchQuery(e.target.value)}
+                                    placeholder="Search by medicine, code, brand..."
+                                    className="w-full rounded-xl border border-slate-200 bg-white py-2.5 pl-9 pr-3 text-sm font-semibold text-slate-700 focus:outline-none focus:ring-2 focus:ring-healthcare-primary/30 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200"
+                                />
+                            </div>
+
+                            <select
+                                value={statusFilter}
+                                onChange={(e) =>
+                                    setStatusFilter(e.target.value as 'all' | InventoryStatus)
+                                }
+                                className="rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm font-semibold text-slate-700 focus:outline-none dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200"
+                            >
+                                <option value="all">All Status</option>
+                                <option value="in_stock">In Stock</option>
+                                <option value="low_stock">Low Stock</option>
+                                <option value="expiring_soon">Expiring Soon</option>
+                                <option value="expired">Expired</option>
+                                <option value="out_of_stock">Out of Stock</option>
+                            </select>
+
+                            <select
+                                value={dosageFormFilter}
+                                onChange={(e) => setDosageFormFilter(e.target.value)}
+                                className="rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm font-semibold text-slate-700 focus:outline-none dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200"
+                            >
+                                {dosageForms.map((form) => (
+                                    <option key={form} value={form}>
+                                        {form === 'all' ? 'All Forms' : form}
+                                    </option>
+                                ))}
+                            </select>
+
+                            <select
+                                value={String(expiryWindowDays)}
+                                onChange={(e) => setExpiryWindowDays(Number(e.target.value))}
+                                className="rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm font-semibold text-slate-700 focus:outline-none dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200"
+                            >
+                                <option value="30">Expiry Window: 30d</option>
+                                <option value="60">Expiry Window: 60d</option>
+                                <option value="90">Expiry Window: 90d</option>
+                                <option value="180">Expiry Window: 180d</option>
+                            </select>
+
+                            <select
+                                value={sortBy}
+                                onChange={(e) => setSortBy(e.target.value as SortOption)}
+                                className="rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm font-semibold text-slate-700 focus:outline-none dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200"
+                            >
+                                <option value="name_asc">Sort: Name</option>
+                                <option value="stock_desc">Sort: Stock High-Low</option>
+                                <option value="stock_asc">Sort: Stock Low-High</option>
+                                <option value="expiry_soonest">Sort: Earliest Expiry</option>
+                                <option value="value_desc">Sort: Value High-Low</option>
+                            </select>
+                        </div>
+
+                        <div className="flex flex-wrap items-center justify-between gap-3">
+                            <div className="flex items-center gap-2 whitespace-nowrap text-xs font-bold uppercase tracking-wider text-slate-500">
+                                <span>
+                                    Showing {visibleRows.length} / {filteredRows.length} filtered items
+                                </span>
+                                <span className="text-slate-300">•</span>
+                                <span>Total Inventory: {detailedRows.length}</span>
+                                <span className="text-slate-300">•</span>
+                                <span>
+                                    Filtered Value: RWF {filteredInventoryValue.toLocaleString()}
+                                </span>
+                            </div>
+                            <div className="flex items-center gap-2">
+                                <select
+                                    value={String(rowLimit)}
+                                    onChange={(e) => setRowLimit(Number(e.target.value))}
+                                    className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-black uppercase tracking-wider text-slate-600 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300"
+                                >
+                                    <option value="25">25 rows</option>
+                                    <option value="50">50 rows</option>
+                                    <option value="100">100 rows</option>
+                                    <option value="200">200 rows</option>
+                                    <option value="500">500 rows</option>
+                                </select>
+                                <button
+                                    onClick={() => {
+                                        setSearchQuery('');
+                                        setStatusFilter('all');
+                                        setDosageFormFilter('all');
+                                        setExpiryWindowDays(90);
+                                        setSortBy('name_asc');
+                                        setRowLimit(50);
+                                    }}
+                                    className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs font-black uppercase tracking-wider text-slate-600 transition-colors hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300 dark:hover:bg-slate-700"
+                                >
+                                    Reset Filters
+                                </button>
+                            </div>
+                        </div>
+
                         <div
-                            key={bucket.bucket}
-                            className="rounded-xl bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-800 p-3"
+                            ref={stockTableRef}
+                            onScroll={(event) => setStockScrollTop(event.currentTarget.scrollTop)}
+                            className="max-h-[560px] overflow-x-auto overflow-y-auto rounded-xl border border-slate-200 dark:border-slate-800"
                         >
-                            <p className="text-[10px] font-black uppercase text-slate-400">
-                                {bucket.bucket} days
-                            </p>
-                            <p className="text-sm font-black text-slate-700 dark:text-slate-100">
-                                {Number(bucket.quantity || 0).toLocaleString()} units
-                            </p>
-                            <p className="text-[11px] font-semibold text-slate-500">
-                                RWF {Number(bucket.value || 0).toLocaleString()}
+                            <table className="tc-table w-full whitespace-nowrap text-left text-sm">
+                                <thead className="bg-slate-50 dark:bg-slate-800/50">
+                                    <tr className="text-[10px] uppercase tracking-wider text-slate-400">
+                                        <th className="px-4 py-3 font-semibold">Medicine</th>
+                                        <th className="px-4 py-3 font-semibold">Code</th>
+                                        <th className="px-4 py-3 font-semibold">Form</th>
+                                        <th className="px-4 py-3 text-right font-semibold">Stock</th>
+                                        <th className="px-4 py-3 text-right font-semibold">Cost</th>
+                                        <th className="px-4 py-3 text-right font-semibold">Value</th>
+                                        <th className="px-4 py-3 text-center font-semibold">Expiry</th>
+                                        <th className="px-4 py-3 text-center font-semibold">Days Left</th>
+                                        <th className="px-4 py-3 text-center font-semibold">Status</th>
+                                        <th className="px-4 py-3 text-center font-semibold">Date Added</th>
+                                    </tr>
+                                </thead>
+                                <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+                                    {visibleRows.length === 0 ? (
+                                        <tr>
+                                            <td colSpan={10} className="px-6 py-12 text-center">
+                                                <p className="text-sm font-bold text-slate-500">
+                                                    No inventory items match the selected filters.
+                                                </p>
+                                            </td>
+                                        </tr>
+                                    ) : (
+                                        <>
+                                            {shouldVirtualizeRows && stockTopSpacerHeight > 0 && (
+                                                <tr>
+                                                    <td
+                                                        colSpan={10}
+                                                        style={{ height: `${stockTopSpacerHeight}px` }}
+                                                    />
+                                                </tr>
+                                            )}
+                                            {renderedRows.map((row) => (
+                                                <tr
+                                                    key={row.id}
+                                                    className="hover:bg-slate-50 dark:hover:bg-slate-800/30"
+                                                >
+                                                    <td className="px-4 py-3 whitespace-nowrap">
+                                                        <div className="font-black text-slate-800 dark:text-white">
+                                                            {row.name}
+                                                        </div>
+                                                        <div className="whitespace-nowrap text-[10px] font-semibold uppercase tracking-wide text-slate-400">
+                                                            {row.brand_name || 'N/A'}
+                                                        </div>
+                                                    </td>
+                                                    <td className="px-4 py-3 whitespace-nowrap font-bold text-slate-600 dark:text-slate-300">
+                                                        {row.code}
+                                                    </td>
+                                                    <td className="px-4 py-3 whitespace-nowrap font-semibold text-slate-600 dark:text-slate-300">
+                                                        {row.dosage_form || 'N/A'}
+                                                    </td>
+                                                    <td className="px-4 py-3 whitespace-nowrap text-right font-black text-slate-800 dark:text-white">
+                                                        {Number(row.stock_quantity || 0).toLocaleString()}
+                                                    </td>
+                                                    <td className="px-4 py-3 whitespace-nowrap text-right font-semibold text-slate-600 dark:text-slate-300">
+                                                        RWF {Number(row.cost_price || 0).toLocaleString()}
+                                                    </td>
+                                                    <td className="px-4 py-3 whitespace-nowrap text-right font-black text-healthcare-primary">
+                                                        RWF {Number(row.inventory_value || 0).toLocaleString()}
+                                                    </td>
+                                                    <td className="px-4 py-3 whitespace-nowrap text-center font-semibold text-slate-600 dark:text-slate-300">
+                                                        {row.expiry_date
+                                                            ? formatLocalDate(row.expiry_date)
+                                                            : 'N/A'}
+                                                    </td>
+                                                    <td className="px-4 py-3 whitespace-nowrap text-center font-semibold">
+                                                        {row.days_to_expiry === null ? (
+                                                            <span className="text-slate-400">—</span>
+                                                        ) : row.days_to_expiry < 0 ? (
+                                                            <span className="text-rose-600">
+                                                                {Math.abs(row.days_to_expiry)}d overdue
+                                                            </span>
+                                                        ) : (
+                                                            <span className="text-slate-700 dark:text-slate-200">
+                                                                {row.days_to_expiry}d
+                                                            </span>
+                                                        )}
+                                                    </td>
+                                                    <td className="px-4 py-3 whitespace-nowrap text-center">
+                                                        <span
+                                                            className={cn(
+                                                                'whitespace-nowrap rounded-full border px-2.5 py-1 text-[10px] font-black uppercase tracking-wider',
+                                                                statusClassName[row.status],
+                                                            )}
+                                                        >
+                                                            {statusLabel[row.status]}
+                                                        </span>
+                                                    </td>
+                                                    <td className="px-4 py-3 whitespace-nowrap text-center text-xs font-semibold text-slate-500 dark:text-slate-400">
+                                                        {row.created_at
+                                                            ? formatLocalDate(row.created_at)
+                                                            : 'N/A'}
+                                                    </td>
+                                                </tr>
+                                            ))}
+                                            {shouldVirtualizeRows && stockBottomSpacerHeight > 0 && (
+                                                <tr>
+                                                    <td
+                                                        colSpan={10}
+                                                        style={{ height: `${stockBottomSpacerHeight}px` }}
+                                                    />
+                                                </tr>
+                                            )}
+                                        </>
+                                    )}
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </>
+            ) : (
+                <>
+                    <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-5">
+                        <SummaryCard
+                            title="Total Valuation"
+                            value={`RWF ${Number(stockSummary?.total_value || 0).toLocaleString()}`}
+                            trend="Inventory value"
+                            icon={<DollarSign size={16} />}
+                        />
+                        <SummaryCard
+                            title="Low Stock"
+                            value={`${Number(stockSummary?.low_stock_count || statusCounts.low_stock)}`}
+                            trend="Reorder candidates"
+                            icon={<AlertTriangle size={16} />}
+                            color="amber"
+                        />
+                        <SummaryCard
+                            title="Expiring Soon"
+                            value={`${statusCounts.expiring_soon}`}
+                            trend={`${expiryWindowDays}d window`}
+                            icon={<AlertTriangle size={16} />}
+                            color="rose"
+                        />
+                        <SummaryCard
+                            title="Expired"
+                            value={`${statusCounts.expired}`}
+                            trend="Requires action"
+                            icon={<AlertTriangle size={16} />}
+                            color="rose"
+                        />
+                        <SummaryCard
+                            title="Out of Stock"
+                            value={`${statusCounts.out_of_stock}`}
+                            trend="Immediate action"
+                            icon={<Package size={16} />}
+                            color="rose"
+                        />
+                    </div>
+
+                    <div className="space-y-3">
+                        <div>
+                            <h3 className="text-sm font-black uppercase tracking-wide text-slate-700 dark:text-slate-200">
+                                Stock Analysis
+                            </h3>
+                            <p className="text-xs font-medium text-slate-500 dark:text-slate-400">
+                                ABC classification and replenishment signals for inventory planning.
                             </p>
                         </div>
-                    ))}
-                </div>
-            </div>
-
-            <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-4 space-y-4">
-                <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-6 gap-3">
-                    <div className="relative md:col-span-2 xl:col-span-2">
-                        <Search
-                            size={16}
-                            className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"
-                        />
-                        <input
-                            value={searchQuery}
-                            onChange={(e) => setSearchQuery(e.target.value)}
-                            placeholder="Search by medicine, code, brand..."
-                            className="w-full pl-9 pr-3 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-sm font-semibold text-slate-700 dark:text-slate-200 focus:outline-none focus:ring-2 focus:ring-healthcare-primary/30"
-                        />
+                        <ABCAnalysisReport />
                     </div>
 
-                    <select
-                        value={statusFilter}
-                        onChange={(e) => setStatusFilter(e.target.value as 'all' | InventoryStatus)}
-                        className="px-3 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-sm font-semibold text-slate-700 dark:text-slate-200 focus:outline-none"
-                    >
-                        <option value="all">All Status</option>
-                        <option value="in_stock">In Stock</option>
-                        <option value="low_stock">Low Stock</option>
-                        <option value="expiring_soon">Expiring Soon</option>
-                        <option value="expired">Expired</option>
-                        <option value="out_of_stock">Out of Stock</option>
-                    </select>
-
-                    <select
-                        value={dosageFormFilter}
-                        onChange={(e) => setDosageFormFilter(e.target.value)}
-                        className="px-3 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-sm font-semibold text-slate-700 dark:text-slate-200 focus:outline-none"
-                    >
-                        {dosageForms.map((form) => (
-                            <option key={form} value={form}>
-                                {form === 'all' ? 'All Forms' : form}
-                            </option>
-                        ))}
-                    </select>
-
-                    <select
-                        value={String(expiryWindowDays)}
-                        onChange={(e) => setExpiryWindowDays(Number(e.target.value))}
-                        className="px-3 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-sm font-semibold text-slate-700 dark:text-slate-200 focus:outline-none"
-                    >
-                        <option value="30">Expiry Window: 30d</option>
-                        <option value="60">Expiry Window: 60d</option>
-                        <option value="90">Expiry Window: 90d</option>
-                        <option value="180">Expiry Window: 180d</option>
-                    </select>
-
-                    <select
-                        value={sortBy}
-                        onChange={(e) => setSortBy(e.target.value as SortOption)}
-                        className="px-3 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-sm font-semibold text-slate-700 dark:text-slate-200 focus:outline-none"
-                    >
-                        <option value="name_asc">Sort: Name</option>
-                        <option value="stock_desc">Sort: Stock High-Low</option>
-                        <option value="stock_asc">Sort: Stock Low-High</option>
-                        <option value="expiry_soonest">Sort: Earliest Expiry</option>
-                        <option value="value_desc">Sort: Value High-Low</option>
-                    </select>
-                </div>
-
-                <div className="flex items-center justify-between gap-3 flex-wrap">
-                    <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-slate-500 whitespace-nowrap">
-                        <span>
-                            Showing {visibleRows.length} / {filteredRows.length} filtered items
-                        </span>
-                        <span className="text-slate-300">•</span>
-                        <span>Total Inventory: {detailedRows.length}</span>
-                        <span className="text-slate-300">•</span>
-                        <span>Filtered Value: RWF {filteredInventoryValue.toLocaleString()}</span>
+                    <div className="space-y-3">
+                        <div>
+                            <h3 className="text-sm font-black uppercase tracking-wide text-slate-700 dark:text-slate-200">
+                                Reorder Priorities
+                            </h3>
+                            <p className="text-xs font-medium text-slate-500 dark:text-slate-400">
+                                Low-stock actions now live inside stock analytics instead of a separate report page.
+                            </p>
+                        </div>
+                        <ReorderSuggestions />
                     </div>
-                    <div className="flex items-center gap-2">
-                        <select
-                            value={String(rowLimit)}
-                            onChange={(e) => setRowLimit(Number(e.target.value))}
-                            className="px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-xs font-black text-slate-600 dark:text-slate-300 uppercase tracking-wider"
-                        >
-                            <option value="25">25 rows</option>
-                            <option value="50">50 rows</option>
-                            <option value="100">100 rows</option>
-                            <option value="200">200 rows</option>
-                            <option value="500">500 rows</option>
-                        </select>
-                        <button
-                            onClick={() => {
-                                setSearchQuery('');
-                                setStatusFilter('all');
-                                setDosageFormFilter('all');
-                                setExpiryWindowDays(90);
-                                setSortBy('name_asc');
-                                setRowLimit(50);
-                            }}
-                            className="px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-xs font-black text-slate-600 dark:text-slate-300 uppercase tracking-wider hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors"
-                        >
-                            Reset Filters
-                        </button>
-                    </div>
-                </div>
-
-                <div
-                    ref={stockTableRef}
-                    onScroll={(event) => setStockScrollTop(event.currentTarget.scrollTop)}
-                    className="overflow-x-auto overflow-y-auto max-h-[560px] border border-slate-200 dark:border-slate-800 rounded-xl"
-                >
-                    <table className="tc-table w-full text-left text-sm whitespace-nowrap">
-                        <thead className="bg-slate-50 dark:bg-slate-800/50">
-                            <tr className="text-[10px] uppercase tracking-wider text-slate-400">
-                                <th className="px-4 py-3 font-semibold whitespace-nowrap">
-                                    Medicine
-                                </th>
-                                <th className="px-4 py-3 font-semibold whitespace-nowrap">Code</th>
-                                <th className="px-4 py-3 font-semibold whitespace-nowrap">Form</th>
-                                <th className="px-4 py-3 font-semibold text-right whitespace-nowrap">
-                                    Stock
-                                </th>
-                                <th className="px-4 py-3 font-semibold text-right whitespace-nowrap">
-                                    Cost
-                                </th>
-                                <th className="px-4 py-3 font-semibold text-right whitespace-nowrap">
-                                    Value
-                                </th>
-                                <th className="px-4 py-3 font-semibold text-center whitespace-nowrap">
-                                    Expiry
-                                </th>
-                                <th className="px-4 py-3 font-semibold text-center whitespace-nowrap">
-                                    Days Left
-                                </th>
-                                <th className="px-4 py-3 font-semibold text-center whitespace-nowrap">
-                                    Status
-                                </th>
-                                <th className="px-4 py-3 font-semibold text-center whitespace-nowrap">
-                                    Date Added
-                                </th>
-                            </tr>
-                        </thead>
-                        <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
-                            {visibleRows.length === 0 ? (
-                                <tr>
-                                    <td colSpan={10} className="px-6 py-12 text-center">
-                                        <p className="text-sm font-bold text-slate-500">
-                                            No inventory items match the selected filters.
-                                        </p>
-                                    </td>
-                                </tr>
-                            ) : (
-                                <>
-                                    {shouldVirtualizeRows && stockTopSpacerHeight > 0 && (
-                                        <tr>
-                                            <td
-                                                colSpan={10}
-                                                style={{ height: `${stockTopSpacerHeight}px` }}
-                                            />
-                                        </tr>
-                                    )}
-                                    {renderedRows.map((row) => (
-                                        <tr
-                                            key={row.id}
-                                            className="hover:bg-slate-50 dark:hover:bg-slate-800/30"
-                                        >
-                                            <td className="px-4 py-3 whitespace-nowrap">
-                                                <div className="font-black text-slate-800 dark:text-white">
-                                                    {row.name}
-                                                </div>
-                                                <div className="text-[10px] font-semibold text-slate-400 uppercase tracking-wide whitespace-nowrap">
-                                                    {row.brand_name || 'N/A'}
-                                                </div>
-                                            </td>
-                                            <td className="px-4 py-3 font-bold text-slate-600 dark:text-slate-300 whitespace-nowrap">
-                                                {row.code}
-                                            </td>
-                                            <td className="px-4 py-3 text-slate-600 dark:text-slate-300 font-semibold whitespace-nowrap">
-                                                {row.dosage_form || 'N/A'}
-                                            </td>
-                                            <td className="px-4 py-3 text-right font-black text-slate-800 dark:text-white whitespace-nowrap">
-                                                {Number(row.stock_quantity || 0).toLocaleString()}
-                                            </td>
-                                            <td className="px-4 py-3 text-right text-slate-600 dark:text-slate-300 font-semibold whitespace-nowrap">
-                                                RWF {Number(row.cost_price || 0).toLocaleString()}
-                                            </td>
-                                            <td className="px-4 py-3 text-right font-black text-healthcare-primary whitespace-nowrap">
-                                                RWF{' '}
-                                                {Number(row.inventory_value || 0).toLocaleString()}
-                                            </td>
-                                            <td className="px-4 py-3 text-center text-slate-600 dark:text-slate-300 font-semibold whitespace-nowrap">
-                                                {row.expiry_date
-                                                    ? formatLocalDate(row.expiry_date)
-                                                    : 'N/A'}
-                                            </td>
-                                            <td className="px-4 py-3 text-center font-semibold whitespace-nowrap">
-                                                {row.days_to_expiry === null ? (
-                                                    <span className="text-slate-400">—</span>
-                                                ) : row.days_to_expiry < 0 ? (
-                                                    <span className="text-rose-600">
-                                                        {Math.abs(row.days_to_expiry)}d overdue
-                                                    </span>
-                                                ) : (
-                                                    <span className="text-slate-700 dark:text-slate-200">
-                                                        {row.days_to_expiry}d
-                                                    </span>
-                                                )}
-                                            </td>
-                                            <td className="px-4 py-3 text-center whitespace-nowrap">
-                                                <span
-                                                    className={cn(
-                                                        'px-2.5 py-1 rounded-full text-[10px] font-black border uppercase tracking-wider whitespace-nowrap',
-                                                        statusClassName[row.status],
-                                                    )}
-                                                >
-                                                    {statusLabel[row.status]}
-                                                </span>
-                                            </td>
-                                            <td className="px-4 py-3 text-center text-slate-500 dark:text-slate-400 text-xs font-semibold whitespace-nowrap">
-                                                {row.created_at
-                                                    ? formatLocalDate(row.created_at)
-                                                    : 'N/A'}
-                                            </td>
-                                        </tr>
-                                    ))}
-                                    {shouldVirtualizeRows && stockBottomSpacerHeight > 0 && (
-                                        <tr>
-                                            <td
-                                                colSpan={10}
-                                                style={{ height: `${stockBottomSpacerHeight}px` }}
-                                            />
-                                        </tr>
-                                    )}
-                                </>
-                            )}
-                        </tbody>
-                    </table>
-                </div>
-            </div>
-
-            <div className="bg-slate-50 dark:bg-slate-900/50 rounded-[32px] p-8 border border-slate-200 dark:border-slate-800">
-                <div className="flex items-center justify-between mb-8">
-                    <div>
-                        <h3 className="text-xl font-black text-slate-800 dark:text-white uppercase tracking-tight">
-                            Stock Analysis
-                        </h3>
-                        <p className="text-slate-500 text-sm font-medium">
-                            ABC Classification based on consumption value
-                        </p>
-                    </div>
-                </div>
-                <ABCAnalysisReport />
-            </div>
+                </>
+            )}
         </div>
     );
 }
 
-function SummaryCard({ title, value, trend, icon, color = 'teal' }: any) {
+function SummaryCard({ title, value, trend, icon, color = 'teal', borderless = false }: any) {
     return (
-        <div className="tc-stat-card tc-stat-card-neutral group hover:shadow-lg">
+        <div
+            className={cn(
+                'tc-stat-card tc-stat-card-neutral group hover:shadow-lg',
+                borderless && 'border-0 shadow-sm',
+            )}
+        >
             <div className="tc-stat-card-header">
                 <p className="tc-stat-card-title">{title}</p>
                 <span
