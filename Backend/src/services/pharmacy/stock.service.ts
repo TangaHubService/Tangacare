@@ -492,7 +492,7 @@ export class StockService {
         stock.quantity = newQuantity;
 
         if (difference > 0) {
-            await this.batchService.increaseQuantity(stock.batch_id, difference, organizationId);
+            await this.batchService.increaseCurrentQuantity(stock.batch_id, difference, organizationId);
         } else if (difference < 0) {
             await this.batchService.decreaseQuantity(stock.batch_id, Math.abs(difference), organizationId);
         }
@@ -613,6 +613,23 @@ export class StockService {
         userId: number,
         departmentId?: number,
     ): Promise<void> {
+        const batch = await this.batchService.findOne(batchId, organizationId);
+
+        if (batch.medicine_id !== medicineId) {
+            throw new AppError('Selected batch does not belong to the returned medicine', 400);
+        }
+
+        const batchExpiry = new Date(batch.expiry_date);
+        batchExpiry.setHours(0, 0, 0, 0);
+        const today = new Date();
+        today.setHours(0, 0, 0, 0);
+
+        if (batchExpiry < today) {
+            throw new AppError('Expired stock cannot be restored to sellable inventory', 400);
+        }
+
+        await this.checkIfFrozen(facilityId, organizationId, medicineId, batchId, departmentId ?? null);
+
         const whereCondition: any = {
             facility_id: facilityId,
             organization_id: organizationId,
@@ -632,7 +649,6 @@ export class StockService {
 
         if (!stock) {
             // Create new stock record if doesn't exist
-            const batch = await this.batchService.findOne(batchId, organizationId);
             stock = this.stockRepository.create({
                 facility_id: facilityId,
                 organization_id: organizationId,
@@ -648,7 +664,7 @@ export class StockService {
             stock.quantity += quantity;
         }
 
-        await this.batchService.increaseQuantity(batchId, quantity, organizationId);
+        await this.batchService.increaseCurrentQuantity(batchId, quantity, organizationId);
         await this.stockRepository.save(stock);
 
         // Create stock movement linked to return

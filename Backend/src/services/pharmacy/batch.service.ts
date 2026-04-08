@@ -143,4 +143,10 @@ export class BatchService {
         batch.initial_quantity += quantity;
         return await this.batchRepository.save(batch);
     }
+
+    async increaseCurrentQuantity(batchId: number, quantity: number, organizationId: number): Promise<Batch> {
+        const batch = await this.findOne(batchId, organizationId);
+        batch.current_quantity += quantity;
+        return await this.batchRepository.save(batch);
+    }
 }

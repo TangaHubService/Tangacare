@@ -1,4 +1,4 @@
-import { Repository, EntityManager } from 'typeorm';
+import { Repository, EntityManager, Brackets } from 'typeorm';
 import PDFDocument from 'pdfkit';
 import { AppDataSource } from '../../config/database';
 import { AppError } from '../../middleware/error.middleware';
@@ -431,6 +431,7 @@ export class SaleService {
         organizationId?: number,
         req?: AuthRequest,
         patientId?: number,
+        search?: string,
     ): Promise<{ data: Sale[]; total: number; page: number; limit: number }> {
 
         const skip = (page - 1) * limit;
@@ -459,6 +460,17 @@ export class SaleService {
 
         if (patientId) {
             queryBuilder.andWhere('sale.patient_id = :patientId', { patientId });
+        }
+
+        if (search && search.trim() !== '') {
+            const term = `%${search.trim()}%`;
+            queryBuilder.andWhere(
+                new Brackets((qb) => {
+                    qb.where('sale.sale_number ILIKE :term', { term })
+                        .orWhere('patient.first_name ILIKE :term', { term })
+                        .orWhere('patient.last_name ILIKE :term', { term });
+                }),
+            );
         }
 
         const [data, total] = await queryBuilder.skip(skip).take(limit).getManyAndCount();

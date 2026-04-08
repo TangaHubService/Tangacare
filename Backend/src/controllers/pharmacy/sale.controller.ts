@@ -85,6 +85,7 @@ export class SaleController {
             const limit = req.query.limit ? parseInt(req.query.limit as string, 10) : 10;
             const hasPatientFilter = req.query.patient_id !== undefined;
             const patientId = hasPatientFilter ? parseInt(req.query.patient_id as string, 10) : undefined;
+            const search = typeof req.query.search === 'string' ? req.query.search : undefined;
 
             if (hasPatientFilter && (!Number.isInteger(patientId) || (patientId as number) <= 0)) {
                 ResponseUtil.badRequest(res, 'patient_id must be a positive integer');
@@ -98,6 +99,7 @@ export class SaleController {
                 organizationId,
                 req as any,
                 patientId,
+                search,
             );
             ResponseUtil.success(res, result, 'Sales retrieved successfully');
         } catch (error: any) {

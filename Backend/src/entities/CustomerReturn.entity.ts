@@ -9,10 +9,13 @@ import {
     OneToMany,
     Index,
 } from 'typeorm';
-import { Sale } from './Sale.entity';
+import { Sale, SaleItem } from './Sale.entity';
 import { User } from './User.entity';
 import { Facility } from './Facility.entity';
 import { Organization } from './Organization.entity';
+import { Medicine } from './Medicine.entity';
+import { Batch } from './Batch.entity';
+import { CreditNote } from './CreditNote.entity';
 
 export enum ReturnStatus {
     PENDING = 'pending',
@@ -65,13 +68,28 @@ export class CustomerReturn {
     notes: string;
 
     @Column({ type: 'int', nullable: true })
-    approved_by_id: number;
+    approved_by_id: number | null;
 
     @Column({ type: 'timestamp', nullable: true })
-    approved_at: Date;
+    approved_at: Date | null;
 
     @Column({ type: 'int', nullable: true })
-    credit_note_id: number;
+    rejected_by_id: number | null;
+
+    @Column({ type: 'timestamp', nullable: true })
+    rejected_at: Date | null;
+
+    @Column({ type: 'text', nullable: true })
+    rejection_reason: string | null;
+
+    @Column({ type: 'int', nullable: true })
+    credit_note_id: number | null;
+
+    @Column({ type: 'int', nullable: true })
+    refund_processed_by_id: number | null;
+
+    @Column({ type: 'timestamp', nullable: true })
+    refund_processed_at: Date | null;
 
     @CreateDateColumn()
     created_at: Date;
@@ -92,9 +110,21 @@ export class CustomerReturn {
     @JoinColumn({ name: 'processed_by_id' })
     processedBy: User;
 
-    @ManyToOne(() => User)
+    @ManyToOne(() => User, { nullable: true })
     @JoinColumn({ name: 'approved_by_id' })
-    approvedBy: User;
+    approvedBy: User | null;
+
+    @ManyToOne(() => User, { nullable: true })
+    @JoinColumn({ name: 'rejected_by_id' })
+    rejectedBy: User | null;
+
+    @ManyToOne(() => CreditNote, { nullable: true })
+    @JoinColumn({ name: 'credit_note_id' })
+    creditNote: CreditNote | null;
+
+    @ManyToOne(() => User, { nullable: true })
+    @JoinColumn({ name: 'refund_processed_by_id' })
+    refundProcessedBy: User | null;
 
     @OneToMany(() => CustomerReturnItem, (item) => item.return)
     items: CustomerReturnItem[];
@@ -168,6 +198,18 @@ export class CustomerReturnItem {
     @ManyToOne(() => CustomerReturn, (ret) => ret.items)
     @JoinColumn({ name: 'return_id' })
     return: CustomerReturn;
+
+    @ManyToOne(() => SaleItem, { nullable: false })
+    @JoinColumn({ name: 'sale_item_id' })
+    saleItem: SaleItem;
+
+    @ManyToOne(() => Medicine, { nullable: false })
+    @JoinColumn({ name: 'medicine_id' })
+    medicine: Medicine;
+
+    @ManyToOne(() => Batch, { nullable: false })
+    @JoinColumn({ name: 'batch_id' })
+    batch: Batch;
 
     @ManyToOne(() => Organization, { nullable: true, onDelete: 'SET NULL' })
     @JoinColumn({ name: 'organization_id' })

@@ -34,6 +34,7 @@ export enum AuditEntityType {
     ALERT = 'alert',
     USER = 'user',
     SALE = 'sale',
+    CUSTOMER_RETURN = 'customer_return',
     VENDOR_RETURN = 'vendor_return',
     DISPOSAL_REQUEST = 'disposal_request',
     GOODS_RECEIPT = 'goods_receipt',

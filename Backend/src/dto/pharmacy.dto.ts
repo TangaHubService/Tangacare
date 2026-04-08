@@ -29,6 +29,7 @@ import { TemperatureType } from '../entities/StorageLocation.entity';
 import { ColdChainTelemetrySource } from '../entities/ColdChainTelemetry.entity';
 import { VendorReturnReason } from '../entities/VendorReturn.entity';
 import { DisposalStatus, DisposalType, DisposalReason } from '../entities/DisposalRequest.entity';
+import { ItemCondition, RefundMethod, ReturnReason, ReturnStatus } from '../entities/CustomerReturn.entity';
 
 export class CreateStorageLocationDto {
     @IsInt()
@@ -1552,11 +1553,11 @@ export class CreateReturnItemDto {
     @Min(1)
     quantity_returned: number;
 
-    @IsString()
-    reason: string; // 'expired' | 'damaged' | 'wrong_item' | 'customer_request' | 'adverse_reaction' | 'other'
+    @IsEnum(ReturnReason)
+    reason: ReturnReason;
 
-    @IsString()
-    condition: string; // 'resellable' | 'damaged' | 'expired'
+    @IsEnum(ItemCondition)
+    condition: ItemCondition;
 
     @IsNumber()
     @Min(0)
@@ -1583,8 +1584,8 @@ export class CreateReturnDto {
     @IsOptional()
     organization_id?: number;
 
-    @IsString()
-    refund_method: string; // 'cash' | 'mobile_money' | 'credit_note'
+    @IsEnum(RefundMethod)
+    refund_method: RefundMethod;
 
     @IsArray()
     @ValidateNested({ each: true })
@@ -1605,9 +1606,13 @@ export class ReturnFiltersDto {
     @IsOptional()
     organization_id?: number;
 
+    @IsEnum(ReturnStatus)
+    @IsOptional()
+    status?: ReturnStatus;
+
     @IsString()
     @IsOptional()
-    status?: string; // 'pending' | 'approved' | 'completed' | 'rejected'
+    sale_number?: string;
 
     @IsDateString()
     @IsOptional()

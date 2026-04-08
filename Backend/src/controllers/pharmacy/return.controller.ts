@@ -3,7 +3,7 @@ import { ReturnService } from '../../services/pharmacy/return.service';
 import { CreateReturnDto, ReturnFiltersDto } from '../../dto/pharmacy.dto';
 import { validate } from 'class-validator';
 import { plainToClass } from 'class-transformer';
-import { resolveFacilityId } from '../../utils/request.util';
+import { resolveFacilityId, resolveOrganizationId } from '../../utils/request.util';
 
 export class ReturnController {
     private returnService: ReturnService;
@@ -25,6 +25,7 @@ export class ReturnController {
             const user = (req as any).user;
             const userId = user?.userId;
             const facilityId = resolveFacilityId(req);
+            const organizationId = resolveOrganizationId(req);
 
             if (!userId) {
                 res.status(401).json({ message: 'User ID is required' });
@@ -36,7 +37,12 @@ export class ReturnController {
                 return;
             }
 
-            const customerReturn = await this.returnService.createReturn(createDto, userId, facilityId);
+            if (!organizationId) {
+                res.status(400).json({ message: 'Organization context is required' });
+                return;
+            }
+
+            const customerReturn = await this.returnService.createReturn(createDto, userId, facilityId, organizationId);
 
             res.status(201).json({
                 message: 'Return created successfully',
@@ -51,7 +57,9 @@ export class ReturnController {
         try {
             const filters: ReturnFiltersDto = {
                 facility_id: resolveFacilityId(req),
-                status: req.query.status as string,
+                organization_id: resolveOrganizationId(req),
+                status: req.query.status as any,
+                sale_number: req.query.sale_number as string,
                 start_date: req.query.start_date as string,
                 end_date: req.query.end_date as string,
                 page: Number(req.query.page) || 1,
@@ -72,7 +80,11 @@ export class ReturnController {
     getReturn = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
         try {
             const returnId = Number(req.params.id);
-            const customerReturn = await this.returnService.getReturn(returnId);
+            const customerReturn = await this.returnService.getReturn(
+                returnId,
+                resolveOrganizationId(req),
+                resolveFacilityId(req),
+            );
 
             res.status(200).json({
                 message: 'Return retrieved successfully',
@@ -87,8 +99,20 @@ export class ReturnController {
         try {
             const returnId = Number(req.params.id);
             const userId = (req as any).user?.userId;
+            const organizationId = resolveOrganizationId(req);
+            const facilityId = resolveFacilityId(req);
 
-            const customerReturn = await this.returnService.approveReturn(returnId, userId);
+            if (!userId) {
+                res.status(401).json({ message: 'User ID is required' });
+                return;
+            }
+
+            if (!facilityId || !organizationId) {
+                res.status(400).json({ message: 'Facility and organization context are required' });
+                return;
+            }
+
+            const customerReturn = await this.returnService.approveReturn(returnId, userId, organizationId, facilityId);
 
             res.status(200).json({
                 message: 'Return approved successfully',
@@ -103,14 +127,26 @@ export class ReturnController {
         try {
             const returnId = Number(req.params.id);
             const userId = (req as any).user?.userId;
+            const organizationId = resolveOrganizationId(req);
+            const facilityId = resolveFacilityId(req);
             const { reason } = req.body;
+
+            if (!userId) {
+                res.status(401).json({ message: 'User ID is required' });
+                return;
+            }
 
             if (!reason) {
                 res.status(400).json({ message: 'Rejection reason is required' });
                 return;
             }
 
-            const customerReturn = await this.returnService.rejectReturn(returnId, userId, reason);
+            if (!facilityId || !organizationId) {
+                res.status(400).json({ message: 'Facility and organization context are required' });
+                return;
+            }
+
+            const customerReturn = await this.returnService.rejectReturn(returnId, userId, organizationId, facilityId, reason);
 
             res.status(200).json({
                 message: 'Return rejected successfully',
@@ -124,7 +160,21 @@ export class ReturnController {
     processRefund = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
         try {
             const returnId = Number(req.params.id);
-            const customerReturn = await this.returnService.processRefund(returnId);
+            const userId = (req as any).user?.userId;
+            const organizationId = resolveOrganizationId(req);
+            const facilityId = resolveFacilityId(req);
+
+            if (!userId) {
+                res.status(401).json({ message: 'User ID is required' });
+                return;
+            }
+
+            if (!facilityId || !organizationId) {
+                res.status(400).json({ message: 'Facility and organization context are required' });
+                return;
+            }
+
+            const customerReturn = await this.returnService.processRefund(returnId, userId, organizationId, facilityId);
 
             res.status(200).json({
                 message: 'Refund processed successfully',
