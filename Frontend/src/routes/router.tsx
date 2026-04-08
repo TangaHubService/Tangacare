@@ -148,8 +148,21 @@ const alertsRoute = createRoute({
         return z
             .object({
                 search: z.string().optional(),
-                type: z.enum(['all', 'low_stock', 'expiry']).optional(),
-                status: z.enum(['active', 'resolved']).optional(),
+                type: z
+                    .enum([
+                        'all',
+                        'low_stock',
+                        'expiry',
+                        'expiry_soon',
+                        'expired',
+                        'controlled_drug_threshold',
+                        'reorder_suggestion',
+                        'batch_recall',
+                        'stock_variance',
+                        'cold_chain_excursion',
+                    ])
+                    .optional(),
+                status: z.enum(['active', 'acknowledged', 'resolved']).optional(),
                 alertId: z.string().optional(),
             })
             .parse(search);

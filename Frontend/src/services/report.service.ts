@@ -718,6 +718,8 @@ export const reportService = {
     async getAlerts(params?: {
         facility_id?: number;
         status?: string;
+        type?: string;
+        page?: number;
         limit?: number;
     }): Promise<PaginatedResponse<Alert>> {
         const response = await api.get<any>('/pharmacy/alerts', { params });

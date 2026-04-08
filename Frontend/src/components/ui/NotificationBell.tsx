@@ -1,13 +1,20 @@
-import React, { useState, useEffect } from 'react';
-import { Bell, Check, Trash2, AlertTriangle, ArrowRight } from 'lucide-react';
-import { useSocket } from '../../context/SocketContext';
-import { useAuth } from '../../context/AuthContext';
-import { Link } from '@tanstack/react-router';
-import { pharmacyService } from '../../services/pharmacy.service';
+import React, { useEffect, useMemo, useState } from 'react';
+import { AlertTriangle, ArrowRight, Bell, Check, Trash2 } from 'lucide-react';
+import { Link, useNavigate } from '@tanstack/react-router';
 import clsx from 'clsx';
 import { formatDistanceToNow } from 'date-fns';
-import { useNavigate } from '@tanstack/react-router';
+import { useSocket } from '../../context/SocketContext';
+import { useAuth } from '../../context/AuthContext';
 import { parseLocalDate } from '../../lib/date';
+import {
+    getAlertActionTarget,
+    getAlertReferenceText,
+    getAlertSeverityLabel,
+    getAlertSeverityTone,
+    getAlertTypeLabel,
+    getAlertSortWeight,
+} from '../../lib/alertUi';
+import { pharmacyService } from '../../services/pharmacy.service';
 import type { Alert } from '../../types/pharmacy';
 import { Drawer } from './Drawer';
 
@@ -21,6 +28,7 @@ interface Notification {
     data?: {
         order_id?: number;
         action?: string;
+        alertId?: number;
     };
 }
 
@@ -34,9 +42,19 @@ type FeedItem =
           sortTs: number;
       };
 
+type AlertFeedItem = Extract<FeedItem, { kind: 'alert' }>;
+type NotificationFeedItem = Extract<FeedItem, { kind: 'notification' }>;
+
+type FeedSection = {
+    key: string;
+    title: string;
+    description: string;
+    items: FeedItem[];
+};
+
 export const NotificationBell: React.FC = () => {
     const { socket, isConnected } = useSocket();
-    const { facilityId } = useAuth();
+    const { facilityId, can } = useAuth();
     const [isOpen, setIsOpen] = useState(false);
     const [notifications, setNotifications] = useState<Notification[]>([]);
     const [unreadCount, setUnreadCount] = useState(0);
@@ -46,34 +64,191 @@ export const NotificationBell: React.FC = () => {
     const [isAlertLoading, setIsAlertLoading] = useState(true);
     const [recentAlertIds, setRecentAlertIds] = useState<number[]>([]);
     const navigate = useNavigate();
-    const unreadNotifications = notifications.filter((n) => !n.is_read);
-    const unresolvedAlerts = alerts.filter((a) => a.status === 'active');
-    const feedItems: FeedItem[] = [
-        ...unreadNotifications.map((n) => ({
-            kind: 'notification' as const,
-            created_at: n.created_at,
-            id: n.id,
-            notification: n,
-            sortTs: parseLocalDate(n.created_at).getTime(),
-        })),
-        ...unresolvedAlerts.map((a) => ({
-            kind: 'alert' as const,
-            created_at: a.created_at,
-            id: a.id,
-            alert: a,
-            sortTs: parseLocalDate(a.created_at).getTime(),
-        })),
-    ].sort((a, b) => b.sortTs - a.sortTs);
+
+    const canManageAlerts = can('alerts:write');
+
+    const unreadNotifications = useMemo(
+        () => notifications.filter((notification) => !notification.is_read),
+        [notifications],
+    );
+
+    const criticalAlerts = useMemo(
+        () =>
+            alerts.filter(
+                (alert) =>
+                    (alert.status === 'active' || alert.status === 'acknowledged') &&
+                    (alert.severity === 'critical' || alert.severity === 'out_of_stock'),
+            ),
+        [alerts],
+    );
+
+    const acknowledgedAlerts = useMemo(
+        () => alerts.filter((alert) => alert.status === 'acknowledged'),
+        [alerts],
+    );
+
+    const openAlerts = useMemo(
+        () =>
+            alerts.filter(
+                (alert) =>
+                    alert.status === 'active' &&
+                    alert.severity !== 'critical' &&
+                    alert.severity !== 'out_of_stock',
+            ),
+        [alerts],
+    );
+
+    const feedSections = useMemo<FeedSection[]>(() => {
+        const criticalItems: AlertFeedItem[] = criticalAlerts.map((alert) => ({
+            kind: 'alert',
+            created_at: alert.created_at,
+            id: alert.id,
+            alert,
+            sortTs: parseLocalDate(alert.created_at).getTime(),
+        }));
+
+        const acknowledgedItems: AlertFeedItem[] = acknowledgedAlerts.map((alert) => ({
+            kind: 'alert',
+            created_at: alert.created_at,
+            id: alert.id,
+            alert,
+            sortTs: parseLocalDate(alert.created_at).getTime(),
+        }));
+
+        const openAlertItems: AlertFeedItem[] = openAlerts.map((alert) => ({
+            kind: 'alert',
+            created_at: alert.created_at,
+            id: alert.id,
+            alert,
+            sortTs: parseLocalDate(alert.created_at).getTime(),
+        }));
+
+        const notificationItems: NotificationFeedItem[] = unreadNotifications.map((notification) => ({
+            kind: 'notification',
+            created_at: notification.created_at,
+            id: notification.id,
+            notification,
+            sortTs: parseLocalDate(notification.created_at).getTime(),
+        }));
+
+        return [
+            {
+                key: 'critical',
+                title: 'Critical Alerts',
+                description: 'Immediate stock or safety issues that should be checked first.',
+                items: criticalItems.sort(
+                    (a, b) =>
+                        getAlertSortWeight(a.alert) - getAlertSortWeight(b.alert) ||
+                        b.sortTs - a.sortTs,
+                ),
+            },
+            {
+                key: 'acknowledged',
+                title: 'Owned Alerts',
+                description: 'Alerts already acknowledged but still open and not yet resolved.',
+                items: acknowledgedItems.sort(
+                    (a, b) =>
+                        getAlertSortWeight(a.alert) - getAlertSortWeight(b.alert) ||
+                        b.sortTs - a.sortTs,
+                ),
+            },
+            {
+                key: 'open',
+                title: 'Open Alerts',
+                description: 'Warnings and informational alerts that still need follow-up.',
+                items: openAlertItems.sort(
+                    (a, b) =>
+                        getAlertSortWeight(a.alert) - getAlertSortWeight(b.alert) ||
+                        b.sortTs - a.sortTs,
+                ),
+            },
+            {
+                key: 'notifications',
+                title: 'Unread Notifications',
+                description: 'Recent unread system messages and workflow updates.',
+                items: notificationItems.sort((a, b) => b.sortTs - a.sortTs),
+            },
+        ].filter((section) => section.items.length > 0);
+    }, [acknowledgedAlerts, criticalAlerts, openAlerts, unreadNotifications]);
+
+    const fetchOpenAlerts = async () => {
+        if (!facilityId) return;
+        setIsAlertLoading(true);
+        try {
+            const [activeResponse, acknowledgedResponse] = await Promise.all([
+                pharmacyService.getAlerts({
+                    facility_id: facilityId,
+                    status: 'active',
+                    limit: 8,
+                }),
+                pharmacyService.getAlerts({
+                    facility_id: facilityId,
+                    status: 'acknowledged',
+                    limit: 6,
+                }),
+            ]);
+
+            const merged = [...activeResponse.data, ...acknowledgedResponse.data].sort(
+                (a, b) =>
+                    getAlertSortWeight(a) - getAlertSortWeight(b) ||
+                    new Date(b.created_at).getTime() - new Date(a.created_at).getTime(),
+            );
+
+            setAlerts(merged);
+            setAlertCount(
+                (activeResponse.meta?.total ?? activeResponse.data.length) +
+                    (acknowledgedResponse.meta?.total ?? acknowledgedResponse.data.length),
+            );
+        } catch (error) {
+            console.error('Failed to fetch active alerts:', error);
+        } finally {
+            setIsAlertLoading(false);
+        }
+    };
+
+    const openAlertCenter = (alert: Alert) => {
+        setIsOpen(false);
+        navigate({
+            to: '/app/alerts' as any,
+            search: {
+                status: alert.status === 'acknowledged' ? 'acknowledged' : 'active',
+                alertId: String(alert.id),
+                type: alert.type,
+            } as any,
+        });
+    };
+
+    const openAlertAction = (alert: Alert) => {
+        const actionTarget = getAlertActionTarget(alert);
+        if (!actionTarget) {
+            openAlertCenter(alert);
+            return;
+        }
+
+        setIsOpen(false);
+        navigate({
+            to: actionTarget.to as any,
+            search: (actionTarget.search || {}) as any,
+        });
+    };
 
     const handleNotificationClick = async (notification: Notification) => {
         try {
             if (!notification.is_read) {
-                markAsRead(notification.id); // Use the existing markAsRead function
+                markAsRead(notification.id);
             }
 
-            // Navigate based on notification data
-            if (notification.data && notification.data.order_id) {
-                setIsOpen(false); // Close popover
+            if (notification.data?.alertId) {
+                setIsOpen(false);
+                navigate({
+                    to: '/app/alerts' as any,
+                    search: { status: 'active', alertId: String(notification.data.alertId) } as any,
+                });
+                return;
+            }
+
+            if (notification.data?.order_id) {
+                setIsOpen(false);
                 navigate({
                     to: '/app/procurement/orders/$orderId' as any,
                     params: { orderId: String(notification.data.order_id) } as any,
@@ -85,53 +260,34 @@ export const NotificationBell: React.FC = () => {
         }
     };
 
-    const fetchActiveAlerts = async () => {
-        if (!facilityId) return;
-        setIsAlertLoading(true);
+    const handleAcknowledgeAlert = async (alertId: number) => {
         try {
-            const response = await pharmacyService.getAlerts({
-                facility_id: facilityId,
-                status: 'active',
-                limit: 5,
-            });
-            setAlerts(response.data);
-            setAlertCount(response.meta?.total ?? response.data.length);
+            await pharmacyService.acknowledgeAlert(alertId);
+            await fetchOpenAlerts();
         } catch (error) {
-            console.error('Failed to fetch active alerts:', error);
-        } finally {
-            setIsAlertLoading(false);
+            console.error('Failed to acknowledge alert:', error);
         }
     };
 
-    const handleAlertClick = (alertId: number) => {
-        setIsOpen(false);
-        navigate({
-            to: '/app/alerts' as any,
-            search: { status: 'active', alertId: String(alertId) } as any,
-        });
-    };
-
-    // Initial sync
     useEffect(() => {
         if (socket && isConnected) {
             socket.emit('notification:sync');
         }
-        fetchActiveAlerts();
+        void fetchOpenAlerts();
     }, [socket, isConnected, facilityId]);
 
     useEffect(() => {
         if (!isOpen) return;
-        fetchActiveAlerts();
+        void fetchOpenAlerts();
     }, [isOpen, facilityId]);
 
-    // Real-time listeners
     useEffect(() => {
         if (!socket) return;
 
         const handleNewNotification = (newNotification: Notification) => {
             setNotifications((prev) => [newNotification, ...prev]);
             setUnreadCount((prev) => prev + 1);
-            fetchActiveAlerts();
+            void fetchOpenAlerts();
         };
 
         const handleSync = (data: { notifications: Notification[]; unreadCount: number }) => {
@@ -142,22 +298,28 @@ export const NotificationBell: React.FC = () => {
 
         const handleReadSuccess = ({ notificationId }: { notificationId: number }) => {
             setNotifications((prev) =>
-                prev.map((n) => (n.id === notificationId ? { ...n, is_read: true } : n)),
+                prev.map((notification) =>
+                    notification.id === notificationId
+                        ? { ...notification, is_read: true }
+                        : notification,
+                ),
             );
             setUnreadCount((prev) => Math.max(0, prev - 1));
         };
 
         const handleReadAllSuccess = () => {
-            setNotifications((prev) => prev.map((n) => ({ ...n, is_read: true })));
+            setNotifications((prev) =>
+                prev.map((notification) => ({ ...notification, is_read: true })),
+            );
             setUnreadCount(0);
         };
 
         const handleAlertRefresh = () => {
-            fetchActiveAlerts();
+            void fetchOpenAlerts();
         };
 
         const handleNewAlert = (payload: { id?: number } | number) => {
-            fetchActiveAlerts();
+            void fetchOpenAlerts();
             const id = typeof payload === 'number' ? payload : payload?.id;
             if (!id) return;
             setRecentAlertIds((prev) => Array.from(new Set([id, ...prev])).slice(0, 8));
@@ -198,7 +360,7 @@ export const NotificationBell: React.FC = () => {
     };
 
     const deleteNotification = (id: number) => {
-        setNotifications((prev) => prev.filter((n) => n.id !== id));
+        setNotifications((prev) => prev.filter((notification) => notification.id !== id));
     };
 
     return (
@@ -224,8 +386,8 @@ export const NotificationBell: React.FC = () => {
                 isOpen={isOpen}
                 onClose={() => setIsOpen(false)}
                 size="md"
-                title="Live Activity"
-                subtitle={`${feedItems.length} unresolved items`}
+                title="Operational Inbox"
+                subtitle={`${criticalAlerts.length} critical, ${alerts.length} open alerts, ${unreadCount} unread notifications`}
                 showOverlay
                 closeOnOverlayClick
                 headerActions={
@@ -242,111 +404,224 @@ export const NotificationBell: React.FC = () => {
                 <div className="overflow-y-auto flex-1 custom-scrollbar">
                     {isLoading || isAlertLoading ? (
                         <div className="p-8 text-center text-slate-400 text-sm">Loading...</div>
-                    ) : feedItems.length === 0 ? (
+                    ) : feedSections.length === 0 ? (
                         <div className="p-8 text-center text-slate-400 text-sm flex flex-col items-center gap-2">
                             <Bell size={24} className="text-slate-200" />
-                            No unresolved alerts or unread notifications
+                            No open alerts or unread notifications
                         </div>
                     ) : (
-                        <div className="divide-y divide-slate-100 dark:divide-slate-800">
-                            {feedItems.map((item, index) => {
-                                const isAlert = item.kind === 'alert';
-                                const rowTime = formatDistanceToNow(parseLocalDate(item.created_at), {
-                                    addSuffix: true,
-                                });
-                                const title = isAlert
-                                    ? item.alert.title || 'Alert'
-                                    : item.notification.title;
-                                const message = isAlert
-                                    ? item.alert.message
-                                    : item.notification.message;
-                                const highlight = isAlert
-                                    ? clsx(
-                                          'bg-red-50/50 dark:bg-red-900/20',
-                                          recentAlertIds.includes(item.alert.id) && 'animate-pulse',
-                                      )
-                                    : 'bg-teal-50/40 dark:bg-teal-900/10';
-
-                                return (
-                                    <div
-                                        key={`${item.kind}-${item.id}`}
-                                        onClick={() => {
-                                            if (isAlert) {
-                                                handleAlertClick(item.alert.id);
-                                            } else {
-                                                handleNotificationClick(item.notification);
-                                            }
-                                        }}
-                                        className={clsx(
-                                            'p-3 hover:bg-slate-50 dark:hover:bg-slate-800 transition-all duration-200 flex gap-3 text-left group cursor-pointer animate-in fade-in slide-in-from-right-1',
-                                            highlight,
-                                        )}
-                                        style={{ animationDelay: `${Math.min(index * 35, 240)}ms` }}
-                                    >
-                                        <div className="flex-1 space-y-1">
-                                            <div className="flex items-start justify-between">
-                                                <p
-                                                    className={clsx(
-                                                        'text-sm font-medium text-healthcare-dark flex items-center gap-1.5',
-                                                        isAlert
-                                                            ? 'text-red-600 dark:text-red-400'
-                                                            : 'text-healthcare-primary',
-                                                    )}
-                                                >
-                                                    {isAlert ? (
-                                                        <AlertTriangle size={13} />
-                                                    ) : (
-                                                        <Bell size={13} />
-                                                    )}
-                                                    {title}
-                                                </p>
-                                                <span className="text-[10px] text-slate-400 whitespace-nowrap ml-2">
-                                                    {rowTime}
-                                                </span>
-                                            </div>
-                                            <p className="text-xs text-slate-500 dark:text-slate-400 leading-relaxed">
-                                                {message}
-                                            </p>
-                                            <div className="text-[10px] font-bold uppercase tracking-wide text-slate-400">
-                                                {isAlert
-                                                    ? 'Alert (Unresolved)'
-                                                    : 'Notification (Unread)'}
-                                            </div>
+                        <div className="space-y-5 p-3">
+                            {feedSections.map((section) => (
+                                <section key={section.key} className="space-y-2">
+                                    <div className="px-1">
+                                        <div className="flex items-center justify-between gap-3">
+                                            <h4 className="text-[11px] font-black uppercase tracking-[0.18em] text-slate-400">
+                                                {section.title}
+                                            </h4>
+                                            <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
+                                                {section.items.length} item{section.items.length === 1 ? '' : 's'}
+                                            </span>
                                         </div>
-                                        {!isAlert && (
-                                            <div className="flex flex-col gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                                                <button
-                                                    onClick={(e) => {
-                                                        e.stopPropagation();
-                                                        markAsRead(item.notification.id);
-                                                    }}
-                                                    className="p-1 hover:bg-white dark:hover:bg-slate-700 rounded text-teal-600"
-                                                    title="Mark as read"
-                                                >
-                                                    <Check size={14} />
-                                                </button>
-                                                <button
-                                                    onClick={(e) => {
-                                                        e.stopPropagation();
-                                                        deleteNotification(item.notification.id);
-                                                    }}
-                                                    className="p-1 hover:bg-white dark:hover:bg-slate-700 rounded text-red-400 hover:text-red-500"
-                                                    title="Delete"
-                                                >
-                                                    <Trash2 size={14} />
-                                                </button>
-                                            </div>
-                                        )}
+                                        <p className="mt-1 text-xs text-slate-500">{section.description}</p>
                                     </div>
-                                );
-                            })}
+
+                                    <div className="space-y-2">
+                                        {section.items.map((item, index) => {
+                                            const rowTime = formatDistanceToNow(
+                                                parseLocalDate(item.created_at),
+                                                {
+                                                    addSuffix: true,
+                                                },
+                                            );
+
+                                            if (item.kind === 'notification') {
+                                                return (
+                                                    <div
+                                                        key={`${item.kind}-${item.id}`}
+                                                        onClick={() => {
+                                                            void handleNotificationClick(item.notification);
+                                                        }}
+                                                        className="rounded-2xl border border-slate-200 bg-white p-3 hover:border-healthcare-primary/30 hover:bg-slate-50 transition-all cursor-pointer dark:bg-slate-900 dark:border-slate-800 dark:hover:bg-slate-800/60"
+                                                        style={{
+                                                            animationDelay: `${Math.min(index * 35, 240)}ms`,
+                                                        }}
+                                                    >
+                                                        <div className="flex gap-3">
+                                                            <div className="mt-0.5 w-9 h-9 rounded-xl bg-teal-50 text-healthcare-primary flex items-center justify-center dark:bg-teal-950/20">
+                                                                <Bell size={16} />
+                                                            </div>
+                                                            <div className="flex-1 min-w-0 space-y-2">
+                                                                <div className="flex items-start justify-between gap-3">
+                                                                    <p className="text-sm font-semibold text-healthcare-dark dark:text-white">
+                                                                        {item.notification.title}
+                                                                    </p>
+                                                                    <span className="text-[10px] text-slate-400 whitespace-nowrap">
+                                                                        {rowTime}
+                                                                    </span>
+                                                                </div>
+                                                                <p className="text-xs text-slate-500 dark:text-slate-400 leading-relaxed">
+                                                                    {item.notification.message}
+                                                                </p>
+                                                                <div className="flex items-center justify-between gap-3">
+                                                                    <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
+                                                                        Unread notification
+                                                                    </span>
+                                                                    <div className="flex items-center gap-1">
+                                                                        <button
+                                                                            onClick={(event) => {
+                                                                                event.stopPropagation();
+                                                                                markAsRead(item.notification.id);
+                                                                            }}
+                                                                            className="p-1.5 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg text-teal-600"
+                                                                            title="Mark as read"
+                                                                        >
+                                                                            <Check size={14} />
+                                                                        </button>
+                                                                        <button
+                                                                            onClick={(event) => {
+                                                                                event.stopPropagation();
+                                                                                deleteNotification(item.notification.id);
+                                                                            }}
+                                                                            className="p-1.5 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg text-red-400 hover:text-red-500"
+                                                                            title="Delete"
+                                                                        >
+                                                                            <Trash2 size={14} />
+                                                                        </button>
+                                                                    </div>
+                                                                </div>
+                                                            </div>
+                                                        </div>
+                                                    </div>
+                                                );
+                                            }
+
+                                            const alert = item.alert;
+                                            const actionTarget = getAlertActionTarget(alert);
+                                            const referenceText = getAlertReferenceText(alert);
+
+                                            return (
+                                                <div
+                                                    key={`${item.kind}-${item.id}`}
+                                                    onClick={() => openAlertCenter(alert)}
+                                                    className={clsx(
+                                                        'rounded-2xl border bg-white p-3 transition-all cursor-pointer dark:bg-slate-900',
+                                                        recentAlertIds.includes(alert.id) &&
+                                                            'ring-2 ring-healthcare-primary/40',
+                                                        alert.status === 'acknowledged'
+                                                            ? 'border-amber-200 hover:border-amber-300 dark:border-amber-900/30'
+                                                            : 'border-slate-200 hover:border-healthcare-primary/30 dark:border-slate-800',
+                                                    )}
+                                                    style={{
+                                                        animationDelay: `${Math.min(index * 35, 240)}ms`,
+                                                    }}
+                                                >
+                                                    <div className="flex gap-3">
+                                                        <div
+                                                            className={clsx(
+                                                                'mt-0.5 w-9 h-9 rounded-xl flex items-center justify-center',
+                                                                alert.severity === 'critical' ||
+                                                                    alert.severity === 'out_of_stock'
+                                                                    ? 'bg-rose-50 text-rose-600 dark:bg-rose-950/20 dark:text-rose-300'
+                                                                    : alert.severity === 'warning'
+                                                                        ? 'bg-amber-50 text-amber-600 dark:bg-amber-950/20 dark:text-amber-300'
+                                                                        : 'bg-sky-50 text-sky-600 dark:bg-sky-950/20 dark:text-sky-300',
+                                                            )}
+                                                        >
+                                                            <AlertTriangle size={16} />
+                                                        </div>
+
+                                                        <div className="flex-1 min-w-0 space-y-2">
+                                                            <div className="flex items-start justify-between gap-3">
+                                                                <div className="space-y-1 min-w-0">
+                                                                    <p className="text-sm font-semibold text-healthcare-dark dark:text-white">
+                                                                        {alert.title || getAlertTypeLabel(alert.type)}
+                                                                    </p>
+                                                                    <div className="flex flex-wrap items-center gap-2">
+                                                                        <span
+                                                                            className={clsx(
+                                                                                'px-2 py-1 rounded-full text-[10px] font-black uppercase tracking-wider',
+                                                                                getAlertSeverityTone(alert.severity),
+                                                                            )}
+                                                                        >
+                                                                            {getAlertSeverityLabel(alert.severity)}
+                                                                        </span>
+                                                                        <span className="px-2 py-1 rounded-full text-[10px] font-black uppercase tracking-wider bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300">
+                                                                            {getAlertTypeLabel(alert.type)}
+                                                                        </span>
+                                                                        {alert.status === 'acknowledged' && (
+                                                                            <span className="px-2 py-1 rounded-full text-[10px] font-black uppercase tracking-wider bg-amber-50 text-amber-700 border border-amber-200 dark:bg-amber-950/20 dark:text-amber-300 dark:border-amber-900/40">
+                                                                                Owned
+                                                                            </span>
+                                                                        )}
+                                                                    </div>
+                                                                </div>
+                                                                <span className="text-[10px] text-slate-400 whitespace-nowrap">
+                                                                    {rowTime}
+                                                                </span>
+                                                            </div>
+
+                                                            <p className="text-xs text-slate-500 dark:text-slate-400 leading-relaxed">
+                                                                {alert.message}
+                                                            </p>
+
+                                                            <div className="flex flex-wrap items-center gap-2 text-[10px] text-slate-400">
+                                                                {referenceText && <span>{referenceText}</span>}
+                                                                {alert.status === 'acknowledged' && !referenceText && (
+                                                                    <span>Acknowledged and waiting for closure</span>
+                                                                )}
+                                                            </div>
+
+                                                            <div className="flex flex-wrap items-center gap-2 pt-1">
+                                                                {actionTarget && (
+                                                                    <button
+                                                                        onClick={(event) => {
+                                                                            event.stopPropagation();
+                                                                            openAlertAction(alert);
+                                                                        }}
+                                                                        className="px-3 py-2 rounded-xl bg-healthcare-primary text-white text-[11px] font-black uppercase tracking-wider hover:bg-healthcare-primary/90 transition-colors flex items-center gap-1.5"
+                                                                    >
+                                                                        {actionTarget.label}
+                                                                        <ArrowRight size={12} />
+                                                                    </button>
+                                                                )}
+
+                                                                {alert.status === 'active' && canManageAlerts && (
+                                                                    <button
+                                                                        onClick={(event) => {
+                                                                            event.stopPropagation();
+                                                                            void handleAcknowledgeAlert(alert.id);
+                                                                        }}
+                                                                        className="px-3 py-2 rounded-xl bg-amber-50 text-amber-700 text-[11px] font-black uppercase tracking-wider hover:bg-amber-100 transition-colors"
+                                                                    >
+                                                                        Acknowledge
+                                                                    </button>
+                                                                )}
+
+                                                                <button
+                                                                    onClick={(event) => {
+                                                                        event.stopPropagation();
+                                                                        openAlertCenter(alert);
+                                                                    }}
+                                                                    className="px-3 py-2 rounded-xl bg-slate-100 text-slate-700 text-[11px] font-black uppercase tracking-wider hover:bg-slate-200 transition-colors dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700"
+                                                                >
+                                                                    Open Alert
+                                                                </button>
+                                                            </div>
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                            );
+                                        })}
+                                    </div>
+                                </section>
+                            ))}
                         </div>
                     )}
                 </div>
 
                 <div className="p-3 border-t border-slate-100 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-800/30 flex items-center justify-between">
                     <span className="text-[11px] text-slate-500">
-                        Alerts: {alertCount} | Unread: {unreadCount}
+                        Alerts: {alerts.length} open | Notifications: {unreadCount} unread
                     </span>
                     <Link
                         to={'/app/alerts' as any}
@@ -354,7 +629,7 @@ export const NotificationBell: React.FC = () => {
                         onClick={() => setIsOpen(false)}
                         className="text-[11px] font-bold text-healthcare-primary hover:underline flex items-center gap-1"
                     >
-                        Open alerts <ArrowRight size={12} />
+                        Open alert center <ArrowRight size={12} />
                     </Link>
                 </div>
             </Drawer>

@@ -502,13 +502,24 @@ export interface PurchaseOrderActivity {
 export interface Alert {
     id: number;
     facility_id: number;
-    type: 'low_stock' | 'expiry' | 'system' | 'expiry_soon' | 'expired';
+    type:
+        | 'low_stock'
+        | 'expiry'
+        | 'expiry_soon'
+        | 'expired'
+        | 'controlled_drug_threshold'
+        | 'reorder_suggestion'
+        | 'batch_recall'
+        | 'stock_variance'
+        | 'cold_chain_excursion';
     message: string;
     title: string;
     status: 'active' | 'acknowledged' | 'resolved';
     created_at: string;
     medicine_id?: number;
     batch_id?: number;
+    reference_type?: string | null;
+    reference_id?: number | null;
     current_value?: number;
     threshold_value?: number;
     severity: 'info' | 'warning' | 'critical' | 'out_of_stock';
@@ -517,6 +528,7 @@ export interface Alert {
     action_reason?: string;
     resolved_at?: string;
     resolved_by_id?: number;
+    context_data?: Record<string, any> | null;
     medicine?: Medicine;
     batch?: Batch;
 }

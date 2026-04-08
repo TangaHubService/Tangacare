@@ -1,51 +1,158 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import {
-    AlertTriangle,
-    Bell,
-    Clock,
     AlertCircle,
-    Database,
-    Search,
-    Filter,
-    X,
+    AlertTriangle,
+    ArrowRight,
+    Bell,
     Check,
+    Clock,
+    Database,
+    LifeBuoy,
+    Package,
+    Scale,
+    Search,
+    ShieldAlert,
+    X,
 } from 'lucide-react';
-import { ProtectedRoute } from '../../components/auth/ProtectedRoute';
-import { pharmacyService } from '../../services/pharmacy.service';
-import type { Alert } from '../../types/pharmacy';
-import { SkeletonTable } from '../../components/ui/SkeletonTable';
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
-import { useAuth } from '../../context/AuthContext';
 import { useSearch, useNavigate } from '@tanstack/react-router';
-import { formatLocalDateTime } from '../../lib/date';
+import { ProtectedRoute } from '../../components/auth/ProtectedRoute';
 import { Drawer } from '../../components/ui/Drawer';
+import { SkeletonTable } from '../../components/ui/SkeletonTable';
+import { useAuth } from '../../context/AuthContext';
+import { useSocket } from '../../context/SocketContext';
+import { formatLocalDateTime } from '../../lib/date';
+import {
+    type AlertScope,
+    getAlertAccentTone,
+    getAlertActionTarget,
+    getAlertReferenceText,
+    getAlertScope,
+    getAlertSeverityLabel,
+    getAlertSeverityTone,
+    getAlertSortWeight,
+    getAlertTypeLabel,
+    isExpiryAlertType,
+    isOperationalAlertType,
+} from '../../lib/alertUi';
+import { pharmacyService } from '../../services/pharmacy.service';
+import type { Alert } from '../../types/pharmacy';
 
 function cn(...inputs: ClassValue[]) {
     return twMerge(clsx(inputs));
 }
 
+type SeverityFilter = 'all' | 'critical' | 'warning' | 'info';
+type AlertStatusFilter = 'active' | 'acknowledged' | 'resolved';
+type BackendAlertType = Alert['type'] | 'expiry';
+type TypeFilterOption = {
+    label: string;
+    value?: BackendAlertType;
+    description: string;
+};
+
 const ACTIONS_BY_ALERT_TYPE: Record<string, string[]> = {
     low_stock: ['Restocked', 'PO Created', 'Transferred', 'Adjusted Count', 'False Alarm'],
-    expiry_soon: [
-        'Discounted',
-        'Transferred',
-        'Returned to Supplier',
-        'Quarantined',
-        'False Alarm',
-    ],
+    expiry_soon: ['Discounted', 'Transferred', 'Returned to Supplier', 'Quarantined', 'False Alarm'],
     expired: ['Disposed', 'Returned to Supplier', 'Quarantined', 'False Alarm'],
     controlled_drug_threshold: ['Investigated', 'Adjusted Count', 'Escalated', 'False Alarm'],
     reorder_suggestion: ['PO Created', 'Transferred', 'Deferred', 'False Alarm'],
+    batch_recall: ['Quarantined', 'Recovered', 'Disposed', 'Supplier Notified', 'False Alarm'],
+    stock_variance: ['Adjusted Count', 'Investigated', 'Approved Variance', 'Rejected Variance', 'False Alarm'],
+    cold_chain_excursion: ['Quarantined', 'Temperature Restored', 'Disposed', 'Escalated', 'False Alarm'],
 };
 
-const normalizeAlertType = (type: string | undefined): string => {
+const DIRECT_BACKEND_TYPES = new Set([
+    'low_stock',
+    'controlled_drug_threshold',
+    'reorder_suggestion',
+    'batch_recall',
+    'stock_variance',
+    'cold_chain_excursion',
+    'expiry_soon',
+    'expired',
+    'expiry',
+]);
+
+const ALERT_TYPE_OPTIONS: Record<AlertScope, TypeFilterOption[]> = {
+    all: [
+        { label: 'Low Stock', value: 'low_stock', description: 'Medicines below expected stock threshold.' },
+        { label: 'Controlled Threshold', value: 'controlled_drug_threshold', description: 'Controlled medicines that need immediate review.' },
+        { label: 'Expiring Soon', value: 'expiry_soon', description: 'Batches approaching expiry that need action planning.' },
+        { label: 'Expired', value: 'expired', description: 'Batches already expired and no longer sellable.' },
+        { label: 'Reorder', value: 'reorder_suggestion', description: 'Suggested replenishment actions based on stockout risk.' },
+        { label: 'Variances', value: 'stock_variance', description: 'Count mismatches or variance approvals waiting for follow-up.' },
+        { label: 'Recalls', value: 'batch_recall', description: 'Recall workflows affecting specific medicine batches.' },
+        { label: 'Cold Chain', value: 'cold_chain_excursion', description: 'Storage excursions that may have compromised stock.' },
+    ],
+    inventory: [
+        { label: 'Low Stock', value: 'low_stock', description: 'Medicines below expected stock threshold.' },
+        { label: 'Controlled Threshold', value: 'controlled_drug_threshold', description: 'Controlled medicines that need immediate review.' },
+    ],
+    expiry: [
+        { label: 'Expiring Soon', value: 'expiry_soon', description: 'Batches approaching expiry that need action planning.' },
+        { label: 'Expired', value: 'expired', description: 'Batches already expired and no longer sellable.' },
+    ],
+    operations: [
+        { label: 'Reorder', value: 'reorder_suggestion', description: 'Suggested replenishment actions based on stockout risk.' },
+        { label: 'Variances', value: 'stock_variance', description: 'Count mismatches or variance approvals waiting for follow-up.' },
+        { label: 'Recalls', value: 'batch_recall', description: 'Recall workflows affecting specific medicine batches.' },
+        { label: 'Cold Chain', value: 'cold_chain_excursion', description: 'Storage excursions that may have compromised stock.' },
+    ],
+};
+
+function normalizeAlertType(type: string | undefined): string {
     if (!type) return 'low_stock';
     if (type === 'expiry') return 'expiry_soon';
     return type;
-};
+}
 
-// Modal Component
+function deriveInitialScope(type: string | undefined): AlertScope {
+    const scope = getAlertScope(type);
+    return scope === 'all' ? 'all' : scope;
+}
+
+function deriveInitialSeverity(type: string | undefined): SeverityFilter {
+    if (type === 'low_stock') return 'critical';
+    return 'all';
+}
+
+function getScopeIcon(scope: AlertScope) {
+    if (scope === 'expiry') return AlertTriangle;
+    if (scope === 'operations') return LifeBuoy;
+    if (scope === 'inventory') return Database;
+    return Bell;
+}
+
+function getScopeLabel(scope: AlertScope) {
+    if (scope === 'expiry') return 'Expiry';
+    if (scope === 'operations') return 'Operations';
+    if (scope === 'inventory') return 'Inventory';
+    return 'All alerts';
+}
+
+function getAlertIcon(alert: Alert) {
+    if (alert.type === 'stock_variance') return Scale;
+    if (alert.type === 'batch_recall') return ShieldAlert;
+    if (alert.type === 'reorder_suggestion') return Package;
+    if (isExpiryAlertType(alert.type)) return AlertTriangle;
+    return Database;
+}
+
+function getNextStepText(alert: Alert): string {
+    const actionTarget = getAlertActionTarget(alert);
+    if (actionTarget) {
+        return actionTarget.description;
+    }
+
+    if (alert.type === 'cold_chain_excursion') {
+        return 'Investigate the affected storage location and close the alert from the alert center after documenting the action taken.';
+    }
+
+    return 'Review the alert details, confirm the situation, and record the action taken when you resolve it.';
+}
+
 function ResolveAlertModal({
     alert,
     onClose,
@@ -66,7 +173,7 @@ function ResolveAlertModal({
     useEffect(() => {
         setActionTaken(actionOptions[0] || '');
         setFormError('');
-    }, [alert.id, alertType]);
+    }, [alert.id, alertType, actionOptions]);
 
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
@@ -96,13 +203,7 @@ function ResolveAlertModal({
     };
 
     return (
-        <Drawer
-            isOpen
-            onClose={onClose}
-            size="md"
-            title="Resolve Alert"
-            showOverlay
-        >
+        <Drawer isOpen onClose={onClose} size="md" title="Resolve Alert" showOverlay>
             <div className="bg-white dark:bg-slate-900 rounded-2xl w-full shadow-xl border border-slate-200 dark:border-slate-800 animate-in fade-in zoom-in duration-200">
                 <form onSubmit={handleSubmit} className="p-6 space-y-4">
                     <div className="p-4 bg-slate-50 dark:bg-slate-800/50 rounded-xl border border-slate-100 dark:border-slate-800">
@@ -118,9 +219,7 @@ function ResolveAlertModal({
                     </div>
 
                     <div className="space-y-2">
-                        <label className="text-xs font-bold uppercase text-slate-500">
-                            Action Taken
-                        </label>
+                        <label className="text-xs font-bold uppercase text-slate-500">Action Taken</label>
                         <select
                             required
                             value={actionTaken}
@@ -133,9 +232,6 @@ function ResolveAlertModal({
                                 </option>
                             ))}
                         </select>
-                        <p className="text-[11px] text-slate-500">
-                            Suggested: <span className="font-semibold">{actionOptions[0]}</span>
-                        </p>
                     </div>
 
                     <div className="space-y-2">
@@ -147,7 +243,7 @@ function ResolveAlertModal({
                             minLength={10}
                             value={reason}
                             onChange={(e) => setReason(e.target.value)}
-                            placeholder="Describe existing conditions or specific details..."
+                            placeholder="Describe what was verified and what action was taken..."
                             className="w-full p-3 bg-white dark:bg-slate-900 border-2 border-slate-100 dark:border-slate-800 rounded-xl font-medium text-sm focus:border-healthcare-primary outline-none min-h-[100px]"
                         />
                     </div>
@@ -171,13 +267,7 @@ function ResolveAlertModal({
                             disabled={isSubmitting}
                             className="flex-1 px-4 py-2.5 bg-healthcare-primary text-white font-bold rounded-xl hover:bg-healthcare-primary/90 transition-all shadow-lg shadow-teal-500/20 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
                         >
-                            {isSubmitting ? (
-                                'Resolving...'
-                            ) : (
-                                <>
-                                    <Check size={18} /> Resolve
-                                </>
-                            )}
+                            {isSubmitting ? 'Resolving...' : <><Check size={18} /> Resolve</>}
                         </button>
                     </div>
                 </form>
@@ -187,52 +277,103 @@ function ResolveAlertModal({
 }
 
 export function AlertsPage() {
-    const { user } = useAuth();
+    const { user, can } = useAuth();
+    const { socket } = useSocket();
     const navigate = useNavigate({ from: '/app/alerts' });
-    // @ts-ignore - Route validation is added in router.tsx but TS might not pick it up instantly without codegen run
+    // @ts-ignore TanStack route search is validated in router.tsx
     const searchParams = useSearch({ from: '/app/alerts' });
 
     const [alerts, setAlerts] = useState<Alert[]>([]);
     const [loading, setLoading] = useState(true);
     const [searchQuery, setSearchQuery] = useState(searchParams.search || '');
     const [selectedAlert, setSelectedAlert] = useState<Alert | null>(null);
-    const [filterType, setFilterType] = useState<'all' | 'low_stock' | 'expiry'>(
-        searchParams.type || 'all',
+    const [scopeFilter, setScopeFilter] = useState<AlertScope>(deriveInitialScope(searchParams.type));
+    const [severityFilter, setSeverityFilter] = useState<SeverityFilter>(deriveInitialSeverity(searchParams.type));
+    const [requestedType, setRequestedType] = useState<BackendAlertType | undefined>(
+        typeof searchParams.type === 'string' && DIRECT_BACKEND_TYPES.has(searchParams.type)
+            ? (searchParams.type as BackendAlertType)
+            : undefined,
     );
-    const [statusFilter, setStatusFilter] = useState<'active' | 'resolved'>(
-        searchParams.status || 'active',
-    );
+    const [statusFilter, setStatusFilter] = useState<AlertStatusFilter>(searchParams.status || 'active');
     const alertRefs = useRef<Record<number, HTMLDivElement | null>>({});
+    const canManageAlerts = can('alerts:write') && user?.role?.toString()?.toLowerCase() !== 'auditor';
 
-    const fetchAlerts = async () => {
+    const fetchAlerts = useCallback(async () => {
         setLoading(true);
         try {
-            // Pass statusFilter to backend
-            const response = await pharmacyService.getAlerts({ status: statusFilter });
+            const response = await pharmacyService.getAlerts({
+                status: statusFilter,
+                type: requestedType,
+                limit: 150,
+            });
             setAlerts(response.data);
         } catch (error) {
             console.error('Failed to fetch alerts:', error);
         } finally {
             setLoading(false);
         }
-    };
+    }, [requestedType, statusFilter]);
 
     useEffect(() => {
-        fetchAlerts();
-    }, []);
+        void fetchAlerts();
+    }, [fetchAlerts]);
 
-    // Sync state to URL
+    useEffect(() => {
+        setSearchQuery(searchParams.search || '');
+
+        const nextRequestedType: BackendAlertType | undefined =
+            typeof searchParams.type === 'string' && DIRECT_BACKEND_TYPES.has(searchParams.type)
+                ? (searchParams.type as BackendAlertType)
+                : undefined;
+        setRequestedType(nextRequestedType);
+        setScopeFilter(deriveInitialScope(searchParams.type));
+        setSeverityFilter(deriveInitialSeverity(searchParams.type));
+    }, [searchParams.search, searchParams.type]);
+
+    useEffect(() => {
+        if (!searchParams.status) {
+            setStatusFilter('active');
+            return;
+        }
+
+        if (
+            searchParams.status === 'active' ||
+            searchParams.status === 'acknowledged' ||
+            searchParams.status === 'resolved'
+        ) {
+            setStatusFilter(searchParams.status);
+        }
+    }, [searchParams.status]);
+
+    useEffect(() => {
+        if (!socket) return;
+
+        const refresh = () => {
+            void fetchAlerts();
+        };
+
+        socket.on('alert:new', refresh);
+        socket.on('alert:updated', refresh);
+        socket.on('alert:resolved', refresh);
+
+        return () => {
+            socket.off('alert:new', refresh);
+            socket.off('alert:updated', refresh);
+            socket.off('alert:resolved', refresh);
+        };
+    }, [fetchAlerts, socket]);
+
     useEffect(() => {
         navigate({
             search: {
                 search: searchQuery || undefined,
-                type: filterType === 'all' ? undefined : filterType,
+                type: requestedType || undefined,
                 status: statusFilter === 'active' ? undefined : statusFilter,
                 alertId: searchParams.alertId || undefined,
             },
             replace: true,
         });
-    }, [searchQuery, filterType, statusFilter, navigate, searchParams.alertId]);
+    }, [searchQuery, requestedType, statusFilter, navigate, searchParams.alertId]);
 
     useEffect(() => {
         const targetAlertId = Number(searchParams.alertId);
@@ -244,32 +385,117 @@ export function AlertsPage() {
         }
     }, [searchParams.alertId, alerts, loading]);
 
-    const handleResolve = async (
-        id: number,
-        data: { action_taken: string; action_reason: string },
-    ) => {
+    const handleResolve = async (id: number, data: { action_taken: string; action_reason: string }) => {
         await pharmacyService.resolveAlert(id, data);
-        await fetchAlerts(); // Refresh list
+        await fetchAlerts();
     };
 
-    const filteredAlerts = alerts.filter((alert) => {
-        const matchesSearch =
-            alert.message.toLowerCase().includes(searchQuery.toLowerCase()) ||
-            (alert.title || '').toLowerCase().includes(searchQuery.toLowerCase());
-        const matchesType =
-            filterType === 'all'
-                ? true
-                : filterType === 'low_stock'
-                  ? alert.type === 'low_stock'
-                  : (alert.type || '').includes('expiry') || alert.type === 'expired';
+    const handleAcknowledge = async (id: number) => {
+        await pharmacyService.acknowledgeAlert(id);
+        await fetchAlerts();
+    };
 
-        // Additional status check (though currently backend only returns active)
-        const matchesStatus = alert.status === statusFilter;
-        // Since backend currently returns ONLY active, checking for 'resolved' will likely yield empty list unless I update backend.
-        // I will display a message if filtered list is empty.
+    const handleOpenAction = (alert: Alert) => {
+        const actionTarget = getAlertActionTarget(alert);
+        if (!actionTarget) return;
 
-        return matchesSearch && matchesType && matchesStatus;
-    });
+        navigate({
+            to: actionTarget.to as any,
+            search: (actionTarget.search || {}) as any,
+        });
+    };
+
+    const visibleAlerts = useMemo(() => {
+        return alerts
+            .filter((alert) => {
+                const searchStack = [
+                    alert.title,
+                    alert.message,
+                    getAlertTypeLabel(alert.type),
+                    getAlertReferenceText(alert),
+                    alert.batch?.batch_number,
+                    alert.medicine?.name,
+                ]
+                    .filter(Boolean)
+                    .join(' ')
+                    .toLowerCase();
+
+                const matchesSearch = searchStack.includes(searchQuery.trim().toLowerCase());
+                const matchesScope = scopeFilter === 'all' ? true : getAlertScope(alert.type) === scopeFilter;
+                const matchesSeverity =
+                    severityFilter === 'all'
+                        ? true
+                        : severityFilter === 'critical'
+                            ? alert.severity === 'critical' || alert.severity === 'out_of_stock'
+                            : alert.severity === severityFilter;
+
+                return matchesSearch && matchesScope && matchesSeverity;
+            })
+            .sort((a, b) => {
+                const severityDiff = getAlertSortWeight(a) - getAlertSortWeight(b);
+                if (severityDiff !== 0) return severityDiff;
+                return new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
+            });
+    }, [alerts, scopeFilter, searchQuery, severityFilter]);
+
+    const summary = useMemo(() => {
+        const source = visibleAlerts;
+        return {
+            total: source.length,
+            critical: source.filter((alert) => alert.severity === 'critical' || alert.severity === 'out_of_stock').length,
+            expiry: source.filter((alert) => isExpiryAlertType(alert.type)).length,
+            operations: source.filter((alert) => isOperationalAlertType(alert.type)).length,
+            acknowledged: alerts.filter((alert) => alert.status === 'acknowledged').length,
+        };
+    }, [alerts, visibleAlerts]);
+
+    const availableTypeFilters = useMemo(() => {
+        const options = ALERT_TYPE_OPTIONS[scopeFilter];
+        const counts = visibleAlerts.reduce<Record<string, number>>((acc, alert) => {
+            if (!alert.type) return acc;
+            acc[alert.type] = (acc[alert.type] || 0) + 1;
+            return acc;
+        }, {});
+
+        return options.map((option) => ({
+            ...option,
+            count: counts[option.value || ''] || 0,
+        }));
+    }, [scopeFilter, visibleAlerts]);
+
+    const sections = useMemo(() => {
+        return [
+            {
+                key: 'immediate',
+                title: statusFilter === 'resolved' ? 'Resolved Critical Items' : 'Immediate Action',
+                description:
+                    statusFilter === 'resolved'
+                        ? 'Critical issues that were already closed and should remain traceable.'
+                        : 'Out-of-stock and critical items that need the fastest response.',
+                alerts: visibleAlerts.filter(
+                    (alert) => alert.severity === 'out_of_stock' || alert.severity === 'critical',
+                ),
+            },
+            {
+                key: 'attention',
+                title: statusFilter === 'resolved' ? 'Resolved Warnings' : 'Needs Attention',
+                description:
+                    statusFilter === 'resolved'
+                        ? 'Warning-level items that were resolved and remain in history.'
+                        : 'Warnings and monitored items that still need planned follow-up.',
+                alerts: visibleAlerts.filter((alert) => alert.severity === 'warning'),
+            },
+            {
+                key: 'monitor',
+                title: statusFilter === 'resolved' ? 'Resolved Informational Alerts' : 'Monitor',
+                description:
+                    statusFilter === 'resolved'
+                        ? 'Informational alerts already handled and kept for audit trail.'
+                        : 'Lower-severity alerts that should stay visible without crowding urgent work.',
+                alerts: visibleAlerts.filter((alert) => alert.severity === 'info'),
+            },
+        ].filter((section) => section.alerts.length > 0);
+    }, [statusFilter, visibleAlerts]);
 
     return (
         <ProtectedRoute
@@ -280,6 +506,8 @@ export function AlertsPage() {
                 'FACILITY_ADMIN',
                 'Pharmacist',
                 'PHARMACIST',
+                'Store Keeper',
+                'STORE_KEEPER',
                 'Store Manager',
                 'STORE_MANAGER',
                 'Auditor',
@@ -290,228 +518,408 @@ export function AlertsPage() {
             requireFacility
         >
             <div className="p-5 space-y-6 animate-in fade-in slide-in-from-bottom-2 duration-700">
-                <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
-                    <div className="space-y-1">
+                <div className="flex flex-col xl:flex-row xl:items-start xl:justify-between gap-4">
+                    <div className="space-y-2">
                         <h2 className="text-2xl font-black text-healthcare-dark tracking-tight flex items-center gap-3">
                             <Bell className="text-rose-500" />
-                            System Alerts & Notifications
+                            Alert Center
                         </h2>
-                        <p className="text-slate-500 font-bold text-xs uppercase tracking-wider">
-                            Critical Stock & Expiry Monitoring
+                        <p className="text-slate-500 font-medium max-w-3xl text-sm">
+                            Triage inventory risk, expiry pressure, and operational exceptions from one queue. Each alert now shows its severity, context, and the best next workspace to open.
                         </p>
                     </div>
-                    {/* Status Toggles */}
-                    <div className="bg-slate-100 dark:bg-slate-800 p-1 rounded-xl flex">
-                        <button
-                            onClick={() => setStatusFilter('active')}
-                            className={cn(
-                                'px-4 py-2 rounded-lg text-xs font-black uppercase tracking-wider transition-all',
-                                statusFilter === 'active'
-                                    ? 'bg-white dark:bg-slate-700 text-healthcare-primary shadow-sm'
-                                    : 'text-slate-500 hover:text-slate-700',
-                            )}
-                        >
-                            Active
-                        </button>
-                        <button
-                            onClick={() => setStatusFilter('resolved')}
-                            className={cn(
-                                'px-4 py-2 rounded-lg text-xs font-black uppercase tracking-wider transition-all',
-                                statusFilter === 'resolved'
-                                    ? 'bg-white dark:bg-slate-700 text-healthcare-primary shadow-sm'
-                                    : 'text-slate-500 hover:text-slate-700',
-                            )}
-                        >
-                            History
-                        </button>
-                    </div>
-                </div>
 
-                <div className="flex flex-col md:flex-row gap-4 justify-between items-center">
-                    <div className="flex gap-2">
-                        <button
-                            onClick={() => setFilterType('all')}
-                            className={cn(
-                                'px-4 py-2 rounded-lg text-xs font-black uppercase tracking-wider transition-all border',
-                                filterType === 'all'
-                                    ? 'bg-healthcare-primary text-white border-healthcare-primary shadow-md shadow-healthcare-primary/20'
-                                    : 'bg-white text-slate-500 border-slate-200 hover:border-healthcare-primary/30',
-                            )}
-                        >
-                            All Types
-                        </button>
-                        <button
-                            onClick={() => setFilterType('low_stock')}
-                            className={cn(
-                                'px-4 py-2 rounded-lg text-xs font-black uppercase tracking-wider transition-all border flex items-center gap-2',
-                                filterType === 'low_stock'
-                                    ? 'bg-amber-500 text-white border-amber-500 shadow-md shadow-amber-500/20'
-                                    : 'bg-white text-slate-500 border-slate-200 hover:border-amber-500/30',
-                            )}
-                        >
-                            <Database size={14} /> Low Stock
-                        </button>
-                        <button
-                            onClick={() => setFilterType('expiry')}
-                            className={cn(
-                                'px-4 py-2 rounded-lg text-xs font-black uppercase tracking-wider transition-all border flex items-center gap-2',
-                                filterType === 'expiry'
-                                    ? 'bg-rose-500 text-white border-rose-500 shadow-md shadow-rose-500/20'
-                                    : 'bg-white text-slate-500 border-slate-200 hover:border-rose-500/30',
-                            )}
-                        >
-                            <AlertTriangle size={14} /> Expiry Risk
-                        </button>
-                    </div>
-                    <div className="relative flex-1 max-w-sm w-full">
-                        <Search
-                            className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400"
-                            size={18}
-                        />
-                        <input
-                            type="text"
-                            placeholder="Filter alerts..."
-                            value={searchQuery}
-                            onChange={(e) => setSearchQuery(e.target.value)}
-                            className="w-full pl-11 pr-4 py-2.5 bg-white dark:bg-slate-900 border-2 border-slate-100 dark:border-slate-800 rounded-xl focus:outline-none focus:border-healthcare-primary transition-all text-sm font-bold shadow-sm"
-                        />
-                        {searchQuery && (
+                    <div className="bg-slate-100 dark:bg-slate-800 p-1 rounded-xl flex flex-wrap">
+                        {(['active', 'acknowledged', 'resolved'] as AlertStatusFilter[]).map((status) => (
                             <button
-                                onClick={() => setSearchQuery('')}
-                                className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
-                            >
-                                <X size={14} />
-                            </button>
-                        )}
-                    </div>
-                    <button className="p-2.5 bg-white dark:bg-slate-900 border-2 border-slate-100 dark:border-slate-800 rounded-xl text-slate-400 hover:text-healthcare-primary transition-colors">
-                        <Filter size={18} />
-                    </button>
-                </div>
-
-                <div className="grid grid-cols-1 gap-4">
-                    {loading ? (
-                        <SkeletonTable
-                            rows={4}
-                            columns={1}
-                            headers={null}
-                            animate
-                            className="border-none shadow-none"
-                        />
-                    ) : filteredAlerts.length > 0 ? (
-                        filteredAlerts.map((alert) => (
-                            <div
-                                key={alert.id}
-                                ref={(node) => {
-                                    alertRefs.current[alert.id] = node;
-                                }}
+                                key={status}
+                                onClick={() => setStatusFilter(status)}
                                 className={cn(
-                                    'glass-card p-5 rounded-2xl border-l-4 flex flex-col md:flex-row gap-4 md:items-center transition-all hover:shadow-md group bg-white dark:bg-slate-900',
-                                    alert.severity === 'out_of_stock'
-                                        ? 'border-l-rose-700 border-y-slate-100 border-r-slate-100'
-                                        : alert.severity === 'critical'
-                                          ? 'border-l-rose-500 border-y-slate-100 border-r-slate-100'
-                                          : alert.severity === 'warning'
-                                            ? 'border-l-amber-500 border-y-slate-100 border-r-slate-100'
-                                            : 'border-l-blue-400 border-y-slate-100 border-r-slate-100',
-                                    Number(searchParams.alertId) === alert.id &&
-                                        'ring-2 ring-healthcare-primary ring-offset-2 ring-offset-white dark:ring-offset-slate-900',
+                                    'px-4 py-2 rounded-lg text-xs font-black uppercase tracking-wider transition-all',
+                                    statusFilter === status
+                                        ? 'bg-white dark:bg-slate-700 text-healthcare-primary shadow-sm'
+                                        : 'text-slate-500 hover:text-slate-700',
                                 )}
                             >
-                                <div
+                                {status === 'resolved' ? 'History' : status}
+                            </button>
+                        ))}
+                    </div>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-5 gap-4">
+                    <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm dark:bg-slate-900 dark:border-slate-800">
+                        <p className="text-[11px] font-black uppercase tracking-widest text-slate-400">In View</p>
+                        <p className="mt-2 text-2xl font-black text-slate-900 dark:text-white">{summary.total}</p>
+                        <p className="mt-1 text-xs text-slate-500">Alerts matching the current queue filters.</p>
+                    </div>
+                    <div className="rounded-2xl border border-rose-100 bg-rose-50/70 p-4 dark:bg-rose-950/20 dark:border-rose-900/30">
+                        <p className="text-[11px] font-black uppercase tracking-widest text-rose-500">Critical</p>
+                        <p className="mt-2 text-2xl font-black text-rose-700 dark:text-rose-300">{summary.critical}</p>
+                        <p className="mt-1 text-xs text-rose-600/80 dark:text-rose-300/80">Out-of-stock and critical risk items.</p>
+                    </div>
+                    <div className="rounded-2xl border border-amber-100 bg-amber-50/70 p-4 dark:bg-amber-950/20 dark:border-amber-900/30">
+                        <p className="text-[11px] font-black uppercase tracking-widest text-amber-600">Expiry</p>
+                        <p className="mt-2 text-2xl font-black text-amber-700 dark:text-amber-300">{summary.expiry}</p>
+                        <p className="mt-1 text-xs text-amber-700/80 dark:text-amber-300/80">Near-expiry and expired stock alerts.</p>
+                    </div>
+                    <div className="rounded-2xl border border-sky-100 bg-sky-50/70 p-4 dark:bg-sky-950/20 dark:border-sky-900/30">
+                        <p className="text-[11px] font-black uppercase tracking-widest text-sky-600">Operations</p>
+                        <p className="mt-2 text-2xl font-black text-sky-700 dark:text-sky-300">{summary.operations}</p>
+                        <p className="mt-1 text-xs text-sky-700/80 dark:text-sky-300/80">Recalls, variances, reorder, and cold-chain alerts.</p>
+                    </div>
+                    <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm dark:bg-slate-900 dark:border-slate-800">
+                        <p className="text-[11px] font-black uppercase tracking-widest text-slate-400">Acknowledged</p>
+                        <p className="mt-2 text-2xl font-black text-slate-900 dark:text-white">{summary.acknowledged}</p>
+                        <p className="mt-1 text-xs text-slate-500">Items already owned by someone but not yet closed.</p>
+                    </div>
+                </div>
+
+                <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm dark:bg-slate-900 dark:border-slate-800 space-y-4">
+                    <div className="flex flex-col xl:flex-row xl:items-center gap-4">
+                        <div className="flex flex-wrap gap-2">
+                            {(['all', 'inventory', 'expiry', 'operations'] as AlertScope[]).map((scope) => {
+                                const ScopeIcon = getScopeIcon(scope);
+                                return (
+                                    <button
+                                        key={scope}
+                                        onClick={() => {
+                                            setScopeFilter(scope);
+                                            if (requestedType) {
+                                                setRequestedType(undefined);
+                                            }
+                                        }}
+                                        className={cn(
+                                            'px-4 py-2 rounded-xl text-xs font-black uppercase tracking-wider transition-all border flex items-center gap-2',
+                                            scopeFilter === scope
+                                                ? 'bg-healthcare-primary text-white border-healthcare-primary shadow-md shadow-healthcare-primary/15'
+                                                : 'bg-white text-slate-600 border-slate-200 hover:border-healthcare-primary/30 dark:bg-slate-900 dark:border-slate-800 dark:text-slate-300',
+                                        )}
+                                    >
+                                        <ScopeIcon size={14} />
+                                        {getScopeLabel(scope)}
+                                    </button>
+                                );
+                            })}
+                        </div>
+
+                        <div className="flex flex-wrap gap-2 xl:ml-auto">
+                            {(['all', 'critical', 'warning', 'info'] as SeverityFilter[]).map((severity) => (
+                                <button
+                                    key={severity}
+                                    onClick={() => setSeverityFilter(severity)}
                                     className={cn(
-                                        'w-12 h-12 rounded-xl flex items-center justify-center flex-shrink-0 shadow-sm',
-                                        alert.severity === 'out_of_stock' ||
-                                            alert.severity === 'critical'
-                                            ? 'bg-rose-50 text-rose-500'
-                                            : alert.severity === 'warning'
-                                              ? 'bg-amber-50 text-amber-500'
-                                              : 'bg-blue-50 text-blue-500',
+                                        'px-3 py-2 rounded-xl text-xs font-black uppercase tracking-wider transition-all border',
+                                        severityFilter === severity
+                                            ? getAlertSeverityTone(severity === 'critical' ? 'critical' : severity)
+                                            : 'bg-white text-slate-500 border-slate-200 dark:bg-slate-900 dark:border-slate-800 dark:text-slate-300',
                                     )}
                                 >
-                                    {(alert.type || '').includes('expiry') ||
-                                    alert.type === 'expired' ? (
-                                        <AlertTriangle size={24} />
-                                    ) : alert.type === 'low_stock' ? (
-                                        <Database size={24} />
-                                    ) : (
-                                        <Bell size={24} />
-                                    )}
-                                </div>
-                                <div className="flex-1 space-y-1">
-                                    <div className="flex justify-between items-start">
-                                        <h4 className="font-black text-healthcare-dark text-sm uppercase italic tracking-tight">
-                                            {alert.title || (alert.type || '').replace('_', ' ')}
-                                        </h4>
-                                        <div className="flex items-center gap-1.5 text-slate-400">
-                                            <Clock size={12} />
-                                            <span className="text-[10px] font-bold uppercase">
-                                                {formatLocalDateTime(alert.created_at)}
-                                            </span>
+                                    {severity === 'all' ? 'All Severity' : severity}
+                                </button>
+                            ))}
+                        </div>
+                    </div>
 
-                                            {alert.status === 'resolved' && (
-                                                <span className="ml-2 px-2 py-0.5 bg-green-100 text-green-700 rounded text-[10px] font-bold uppercase">
-                                                    Resolved
-                                                </span>
-                                            )}
-                                        </div>
-                                    </div>
-                                    <p className="text-xs text-slate-600 dark:text-slate-400 font-bold leading-relaxed">
-                                        {alert.message}
-                                    </p>
-                                    <div className="flex gap-4 mt-2">
-                                        {alert.current_value !== undefined && (
-                                            <div className="text-[10px] font-bold text-slate-400 bg-slate-50 px-2 py-1 rounded">
-                                                Current: {alert.current_value}
-                                            </div>
-                                        )}
-                                        {alert.threshold_value !== undefined &&
-                                            alert.threshold_value > 0 && (
-                                                <div className="text-[10px] font-bold text-slate-400 bg-slate-50 px-2 py-1 rounded">
-                                                    Threshold: {alert.threshold_value}
-                                                </div>
-                                            )}
-                                    </div>
-                                    {alert.status === 'resolved' && alert.action_taken && (
-                                        <div className="mt-2 text-[11px]">
-                                            <span className="font-bold text-emerald-700 bg-emerald-50 border border-emerald-100 rounded px-2 py-1">
-                                                Resolved: {alert.action_taken}
-                                            </span>
-                                            {alert.action_reason && (
-                                                <p className="mt-1 text-slate-500 font-medium">
-                                                    {alert.action_reason}
-                                                </p>
-                                            )}
-                                        </div>
-                                    )}
-                                </div>
-                                <div className="flex items-center gap-2 self-end md:self-center">
-                                    {alert.status === 'active' &&
-                                        user?.role?.toString()?.toLowerCase() !== 'auditor' && (
-                                            <button
-                                                onClick={() => setSelectedAlert(alert)}
-                                                className="px-4 py-2 bg-healthcare-primary/10 text-healthcare-primary hover:bg-healthcare-primary hover:text-white rounded-lg text-[10px] font-black uppercase transition-all flex items-center gap-2"
-                                            >
-                                                Resolve
-                                            </button>
-                                        )}
-                                </div>
-                            </div>
-                        ))
-                    ) : (
-                        <div className="glass-card bg-white dark:bg-slate-900 border border-slate-100 dark:border-slate-800 rounded-2xl p-12 text-center flex flex-col items-center gap-3">
-                            <div className="w-16 h-16 rounded-full bg-slate-50 flex items-center justify-center text-slate-400">
-                                <Search size={32} />
-                            </div>
-                            <h3 className="font-black text-healthcare-dark">No Alerts Found</h3>
-                            <p className="text-xs text-slate-400 font-bold uppercase">
-                                {statusFilter === 'active'
-                                    ? "You're all caught up! No active alerts matching criteria."
-                                    : 'No resolved alerts found in history matching criteria.'}
+                    <div className="flex flex-col lg:flex-row gap-3">
+                        <div className="relative flex-1">
+                            <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
+                            <input
+                                type="text"
+                                placeholder="Search by message, medicine, batch, or alert type..."
+                                value={searchQuery}
+                                onChange={(e) => setSearchQuery(e.target.value)}
+                                className="w-full pl-11 pr-10 py-3 bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-800 rounded-xl focus:outline-none focus:border-healthcare-primary transition-all text-sm font-medium"
+                            />
+                            {searchQuery && (
+                                <button
+                                    onClick={() => setSearchQuery('')}
+                                    className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
+                                >
+                                    <X size={14} />
+                                </button>
+                            )}
+                        </div>
+
+                        <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-xs text-slate-600 dark:bg-slate-800/50 dark:border-slate-800 dark:text-slate-300 lg:min-w-[260px]">
+                            <span className="font-black uppercase tracking-wider text-slate-400">Queue Focus</span>
+                            <p className="mt-1 leading-relaxed">
+                                {scopeFilter === 'operations'
+                                    ? 'Operational alerts point to recall, variance, reorder, and exception workflows.'
+                                    : scopeFilter === 'expiry'
+                                        ? 'Expiry alerts route to the stock-side expiry workspace for action planning.'
+                                        : scopeFilter === 'inventory'
+                                            ? 'Inventory alerts focus on medicine stock context and replenishment decisions.'
+                                            : 'All alert domains are visible together in one triage queue.'}
                             </p>
                         </div>
-                    )}
+                    </div>
+
+                    <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4 dark:bg-slate-800/40 dark:border-slate-800">
+                        <div className="flex flex-col lg:flex-row lg:items-start lg:justify-between gap-3">
+                            <div>
+                                <p className="text-[11px] font-black uppercase tracking-widest text-slate-400">
+                                    Queue Lanes
+                                </p>
+                                <p className="mt-1 text-sm text-slate-500">
+                                    Narrow the queue to a specific operational lane when one team needs to focus on a single kind of alert.
+                                </p>
+                            </div>
+                            {requestedType && (
+                                <button
+                                    onClick={() => setRequestedType(undefined)}
+                                    className="px-3 py-2 rounded-xl bg-white text-slate-600 border border-slate-200 text-xs font-black uppercase tracking-wider hover:border-healthcare-primary/30 dark:bg-slate-900 dark:border-slate-700 dark:text-slate-300"
+                                >
+                                    Clear Type Focus
+                                </button>
+                            )}
+                        </div>
+
+                        <div className="mt-4 flex flex-wrap gap-2">
+                            <button
+                                onClick={() => setRequestedType(undefined)}
+                                className={cn(
+                                    'px-3 py-2 rounded-xl text-xs font-black uppercase tracking-wider transition-all border',
+                                    !requestedType
+                                        ? 'bg-healthcare-primary text-white border-healthcare-primary shadow-md shadow-healthcare-primary/15'
+                                        : 'bg-white text-slate-600 border-slate-200 hover:border-healthcare-primary/30 dark:bg-slate-900 dark:border-slate-800 dark:text-slate-300',
+                                )}
+                            >
+                                All {scopeFilter === 'all' ? 'Types' : getScopeLabel(scopeFilter)}
+                            </button>
+
+                            {availableTypeFilters.map((option) => (
+                                <button
+                                    key={option.value}
+                                    onClick={() => {
+                                        setRequestedType(option.value);
+                                        if (option.value) {
+                                            setScopeFilter(getAlertScope(option.value));
+                                        }
+                                    }}
+                                    className={cn(
+                                        'px-3 py-2 rounded-xl text-xs font-black uppercase tracking-wider transition-all border',
+                                        requestedType === option.value
+                                            ? 'bg-white text-healthcare-primary border-healthcare-primary shadow-sm dark:bg-slate-900'
+                                            : 'bg-white text-slate-600 border-slate-200 hover:border-healthcare-primary/30 dark:bg-slate-900 dark:border-slate-800 dark:text-slate-300',
+                                    )}
+                                    title={option.description}
+                                >
+                                    {option.label} <span className="text-[10px] opacity-70">({option.count})</span>
+                                </button>
+                            ))}
+                        </div>
+                    </div>
                 </div>
+
+                {loading ? (
+                    <SkeletonTable
+                        rows={5}
+                        columns={1}
+                        headers={null}
+                        animate
+                        className="border-none shadow-none"
+                    />
+                ) : sections.length > 0 ? (
+                    <div className="space-y-6">
+                        {sections.map((section) => (
+                            <section key={section.key} className="space-y-3">
+                                <div className="flex flex-col md:flex-row md:items-end md:justify-between gap-2">
+                                    <div>
+                                        <h3 className="text-sm font-black uppercase tracking-widest text-slate-500">
+                                            {section.title}
+                                        </h3>
+                                        <p className="text-sm text-slate-500">{section.description}</p>
+                                    </div>
+                                    <p className="text-xs font-bold uppercase tracking-wider text-slate-400">
+                                        {section.alerts.length} item{section.alerts.length === 1 ? '' : 's'}
+                                    </p>
+                                </div>
+
+                                <div className="grid grid-cols-1 gap-4">
+                                    {section.alerts.map((alert) => {
+                                        const AlertIcon = getAlertIcon(alert);
+                                        const actionTarget = getAlertActionTarget(alert);
+                                        const referenceText = getAlertReferenceText(alert);
+                                        const scope = getAlertScope(alert.type);
+
+                                        return (
+                                            <div
+                                                key={alert.id}
+                                                ref={(node) => {
+                                                    alertRefs.current[alert.id] = node;
+                                                }}
+                                                className={cn(
+                                                    'rounded-2xl border border-slate-200 bg-white p-5 shadow-sm transition-all hover:shadow-md dark:bg-slate-900 dark:border-slate-800 border-l-4',
+                                                    getAlertAccentTone(alert.severity),
+                                                    Number(searchParams.alertId) === alert.id &&
+                                                        'ring-2 ring-healthcare-primary ring-offset-2 ring-offset-white dark:ring-offset-slate-900',
+                                                )}
+                                            >
+                                                <div className="flex flex-col xl:flex-row gap-4">
+                                                    <div
+                                                        className={cn(
+                                                            'w-12 h-12 rounded-2xl flex items-center justify-center flex-shrink-0',
+                                                            alert.severity === 'critical' || alert.severity === 'out_of_stock'
+                                                                ? 'bg-rose-50 text-rose-500 dark:bg-rose-950/30 dark:text-rose-300'
+                                                                : alert.severity === 'warning'
+                                                                    ? 'bg-amber-50 text-amber-500 dark:bg-amber-950/30 dark:text-amber-300'
+                                                                    : 'bg-sky-50 text-sky-500 dark:bg-sky-950/30 dark:text-sky-300',
+                                                        )}
+                                                    >
+                                                        <AlertIcon size={22} />
+                                                    </div>
+
+                                                    <div className="flex-1 space-y-3 min-w-0">
+                                                        <div className="flex flex-col lg:flex-row lg:items-start lg:justify-between gap-3">
+                                                            <div className="space-y-2 min-w-0">
+                                                                <div className="flex flex-wrap items-center gap-2">
+                                                                    <h4 className="text-base font-black text-healthcare-dark dark:text-white break-words">
+                                                                        {alert.title || getAlertTypeLabel(alert.type)}
+                                                                    </h4>
+                                                                    <span className={cn('px-2.5 py-1 rounded-full text-[11px] font-black uppercase tracking-wider', getAlertSeverityTone(alert.severity))}>
+                                                                        {getAlertSeverityLabel(alert.severity)}
+                                                                    </span>
+                                                                    <span className="px-2.5 py-1 rounded-full text-[11px] font-black uppercase tracking-wider bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300">
+                                                                        {getAlertTypeLabel(alert.type)}
+                                                                    </span>
+                                                                    <span className="px-2.5 py-1 rounded-full text-[11px] font-black uppercase tracking-wider bg-healthcare-primary/10 text-healthcare-primary">
+                                                                        {getScopeLabel(scope)}
+                                                                    </span>
+                                                                </div>
+
+                                                                <p className="text-sm text-slate-600 dark:text-slate-300 leading-relaxed">
+                                                                    {alert.message}
+                                                                </p>
+
+                                                                <div className="flex flex-wrap items-center gap-3 text-xs text-slate-500">
+                                                                    <span className="inline-flex items-center gap-1.5">
+                                                                        <Clock size={12} />
+                                                                        {formatLocalDateTime(alert.created_at)}
+                                                                    </span>
+                                                                    {referenceText && (
+                                                                        <span className="inline-flex items-center gap-1.5">
+                                                                            <Package size={12} />
+                                                                            {referenceText}
+                                                                        </span>
+                                                                    )}
+                                                                    {alert.reference_type && alert.reference_id && (
+                                                                        <span className="inline-flex items-center gap-1.5">
+                                                                            <ShieldAlert size={12} />
+                                                                            {alert.reference_type.replace(/_/g, ' ')} #{alert.reference_id}
+                                                                        </span>
+                                                                    )}
+                                                                </div>
+                                                            </div>
+
+                                                            <div className="flex flex-wrap items-center gap-2">
+                                                                {alert.status === 'acknowledged' && (
+                                                                    <span className="px-2.5 py-1 rounded-full text-[11px] font-black uppercase tracking-wider bg-amber-50 text-amber-700 border border-amber-200 dark:bg-amber-950/20 dark:text-amber-300 dark:border-amber-900/40">
+                                                                        Acknowledged
+                                                                    </span>
+                                                                )}
+                                                                {alert.status === 'resolved' && (
+                                                                    <span className="px-2.5 py-1 rounded-full text-[11px] font-black uppercase tracking-wider bg-emerald-50 text-emerald-700 border border-emerald-200 dark:bg-emerald-950/20 dark:text-emerald-300 dark:border-emerald-900/40">
+                                                                        Resolved
+                                                                    </span>
+                                                                )}
+                                                            </div>
+                                                        </div>
+
+                                                        <div className="grid grid-cols-1 xl:grid-cols-[minmax(0,1fr)_auto] gap-4 items-start">
+                                                            <div className="rounded-2xl bg-slate-50 border border-slate-200 p-4 dark:bg-slate-800/40 dark:border-slate-800">
+                                                                <p className="text-[11px] font-black uppercase tracking-widest text-slate-400">Next Best Step</p>
+                                                                <p className="mt-2 text-sm text-slate-600 dark:text-slate-300 leading-relaxed">
+                                                                    {getNextStepText(alert)}
+                                                                </p>
+
+                                                                <div className="mt-3 flex flex-wrap gap-2 text-[11px]">
+                                                                    {alert.current_value !== undefined && alert.current_value !== null && (
+                                                                        <span className="px-2.5 py-1 rounded-full bg-white text-slate-600 border border-slate-200 dark:bg-slate-900 dark:text-slate-300 dark:border-slate-700">
+                                                                            Current: {alert.current_value}
+                                                                        </span>
+                                                                    )}
+                                                                    {alert.threshold_value !== undefined &&
+                                                                        alert.threshold_value !== null &&
+                                                                        alert.threshold_value > 0 && (
+                                                                            <span className="px-2.5 py-1 rounded-full bg-white text-slate-600 border border-slate-200 dark:bg-slate-900 dark:text-slate-300 dark:border-slate-700">
+                                                                                Threshold: {alert.threshold_value}
+                                                                            </span>
+                                                                        )}
+                                                                </div>
+                                                            </div>
+
+                                                            <div className="flex flex-wrap xl:flex-col gap-2 xl:min-w-[220px]">
+                                                                {actionTarget && (
+                                                                    <button
+                                                                        onClick={() => handleOpenAction(alert)}
+                                                                        className="px-4 py-2.5 rounded-xl bg-healthcare-primary text-white text-xs font-black uppercase tracking-wider hover:bg-healthcare-primary/90 transition-all flex items-center justify-center gap-2"
+                                                                    >
+                                                                        {actionTarget.label}
+                                                                        <ArrowRight size={14} />
+                                                                    </button>
+                                                                )}
+
+                                                                {alert.status === 'active' && canManageAlerts && (
+                                                                    <button
+                                                                        onClick={() => void handleAcknowledge(alert.id)}
+                                                                        className="px-4 py-2.5 rounded-xl bg-amber-50 text-amber-700 text-xs font-black uppercase tracking-wider hover:bg-amber-100 transition-colors flex items-center justify-center gap-2"
+                                                                    >
+                                                                        <Check size={14} />
+                                                                        Acknowledge
+                                                                    </button>
+                                                                )}
+
+                                                                {(alert.status === 'active' || alert.status === 'acknowledged') && canManageAlerts && (
+                                                                    <button
+                                                                        onClick={() => setSelectedAlert(alert)}
+                                                                        className="px-4 py-2.5 rounded-xl bg-slate-900 text-white text-xs font-black uppercase tracking-wider hover:bg-slate-700 transition-colors dark:bg-slate-100 dark:text-slate-900 dark:hover:bg-white"
+                                                                    >
+                                                                        Resolve Alert
+                                                                    </button>
+                                                                )}
+                                                            </div>
+                                                        </div>
+
+                                                        {alert.status === 'resolved' && alert.action_taken && (
+                                                            <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-3 dark:bg-emerald-950/20 dark:border-emerald-900/40">
+                                                                <p className="text-[11px] font-black uppercase tracking-widest text-emerald-700 dark:text-emerald-300">
+                                                                    Resolution Recorded
+                                                                </p>
+                                                                <p className="mt-1 text-sm font-semibold text-emerald-800 dark:text-emerald-200">
+                                                                    {alert.action_taken}
+                                                                </p>
+                                                                {alert.action_reason && (
+                                                                    <p className="mt-1 text-sm text-emerald-700/90 dark:text-emerald-200/80">
+                                                                        {alert.action_reason}
+                                                                    </p>
+                                                                )}
+                                                            </div>
+                                                        )}
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        );
+                                    })}
+                                </div>
+                            </section>
+                        ))}
+                    </div>
+                ) : (
+                    <div className="rounded-2xl border border-slate-200 bg-white p-12 text-center dark:bg-slate-900 dark:border-slate-800">
+                        <div className="w-16 h-16 rounded-full bg-slate-50 dark:bg-slate-800 mx-auto flex items-center justify-center text-slate-400">
+                            <Search size={30} />
+                        </div>
+                        <h3 className="mt-4 font-black text-healthcare-dark dark:text-white">No Alerts Found</h3>
+                        <p className="mt-2 text-sm text-slate-500">
+                            {statusFilter === 'active'
+                                ? "You're all caught up. No open alerts match the current filters."
+                                : statusFilter === 'acknowledged'
+                                    ? 'No acknowledged alerts match the current filters.'
+                                    : 'No resolved alerts match the current filters.'}
+                        </p>
+                    </div>
+                )}
             </div>
 
             {selectedAlert && (

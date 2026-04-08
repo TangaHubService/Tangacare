@@ -81,7 +81,7 @@ export function DashboardMetrics({ facilityId }: DashboardMetricsProps) {
             color: 'text-red-600',
             bg: 'bg-red-50 dark:bg-red-900/20',
             borderColor: 'border-red-200 dark:border-red-800',
-            link: '/app/alerts?type=expired',
+            link: '/app/alerts?type=expiry',
         },
         {
             label: 'Expiring Soon',
@@ -90,7 +90,7 @@ export function DashboardMetrics({ facilityId }: DashboardMetricsProps) {
             color: 'text-orange-600',
             bg: 'bg-orange-50 dark:bg-orange-900/20',
             borderColor: 'border-orange-200 dark:border-orange-800',
-            link: '/app/alerts?type=expiry_soon',
+            link: '/app/alerts?type=expiry',
         },
         {
             label: 'Low Stock Items',

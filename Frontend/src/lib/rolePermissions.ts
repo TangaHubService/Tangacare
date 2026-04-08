@@ -102,6 +102,8 @@ const ROLE_DEFAULT_PERMISSIONS: Record<string, readonly string[]> = {
         'reports:read',
         'audit:read',
         'stock_movements:read',
+        'alerts:read',
+        'alerts:write',
         'patients:read',
     ],
     technician: [
