@@ -1,12 +1,20 @@
 import api from '../lib/api';
 import type { AxiosRequestConfig } from 'axios';
-import type { Sale, CreateSaleDto, PaginatedResponse } from '../types/pharmacy';
+import type { Sale, CreateSaleDto, CreateSaleResult, PaginatedResponse } from '../types/pharmacy';
 import { normalizePaginatedResponse } from './utils';
 
 export const saleService = {
-    async createSale(payload: CreateSaleDto, config?: AxiosRequestConfig): Promise<Sale> {
+    async createSale(payload: CreateSaleDto, config?: AxiosRequestConfig): Promise<CreateSaleResult> {
         const response = await api.post<any>('/pharmacy/sales', payload, config);
-        return (response.data as any).data ?? response.data;
+        const body = response.data as {
+            success?: boolean;
+            data?: Sale;
+            warnings?: string[];
+            message?: string;
+        };
+        const sale = (body?.data ?? response.data) as Sale;
+        const warnings = Array.isArray(body?.warnings) ? body.warnings : [];
+        return { sale, warnings };
     },
 
     async getSale(id: number): Promise<Sale> {

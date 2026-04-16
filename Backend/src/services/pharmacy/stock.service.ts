@@ -247,10 +247,11 @@ export class StockService {
             queryBuilder.andWhere((qb) => {
                 const subQuery = qb
                     .subQuery()
-                    .select('SUM(s2.quantity)')
+                    .select('SUM(GREATEST(0, s2.quantity - COALESCE(s2.reserved_quantity, 0)))')
                     .from('stocks', 's2')
                     .where('s2.medicine_id = stock.medicine_id')
                     .andWhere('s2.facility_id = stock.facility_id')
+                    .andWhere('s2.is_deleted = false')
                     .getQuery();
                 return `(${subQuery}) < medicine.min_stock_level`;
             });
@@ -273,7 +274,7 @@ export class StockService {
             .where('stock.facility_id = :facilityId', { facilityId })
             .andWhere('stock.organization_id = :organizationId', { organizationId })
             .andWhere('stock.medicine_id = :medicineId', { medicineId })
-            .andWhere('stock.quantity > 0')
+            .andWhere('(stock.quantity - COALESCE(stock.reserved_quantity, 0)) > 0')
             .andWhere('stock.is_deleted = :isDeleted', { isDeleted: false })
             .orderBy('batch.expiry_date', 'ASC');
 
@@ -318,7 +319,7 @@ export class StockService {
             .andWhere('stock.organization_id = :organizationId', { organizationId })
             .andWhere('stock.medicine_id = :medicineId', { medicineId })
             .andWhere('stock.batch_id = :batchId', { batchId })
-            .andWhere('stock.quantity > 0')
+            .andWhere('(stock.quantity - COALESCE(stock.reserved_quantity, 0)) > 0')
             .andWhere('stock.is_deleted = :isDeleted', { isDeleted: false })
             .orderBy('batch.expiry_date', 'ASC');
 
@@ -538,19 +539,24 @@ export class StockService {
         userId: number,
         departmentId?: number,
     ): Promise<void> {
-        const queryBuilder = this.stockRepository.createQueryBuilder('stock')
+        const queryBuilder = this.stockRepository
+            .createQueryBuilder('stock')
+            .leftJoin('stock.batch', 'batch')
             .setLock('pessimistic_write')
             .where('stock.facility_id = :facilityId', { facilityId })
             .andWhere('stock.organization_id = :organizationId', { organizationId })
             .andWhere('stock.medicine_id = :medicineId', { medicineId })
             .andWhere('stock.batch_id = :batchId', { batchId })
-            .andWhere('stock.is_deleted = :isDeleted', { isDeleted: false });
+            .andWhere('stock.is_deleted = :isDeleted', { isDeleted: false })
+            .andWhere('(stock.quantity - COALESCE(stock.reserved_quantity, 0)) >= :qty', { qty: quantity });
 
         if (departmentId === null || departmentId === undefined) {
             queryBuilder.andWhere('stock.department_id IS NULL');
         } else {
             queryBuilder.andWhere('stock.department_id = :departmentId', { departmentId });
         }
+
+        queryBuilder.orderBy('batch.expiry_date', 'ASC').addOrderBy('stock.id', 'ASC');
 
         const stock = await queryBuilder.getOne();
 
@@ -688,12 +694,34 @@ export class StockService {
     /**
      * Get batch cost for COGS calculation at sale time
      */
+    /**
+     * COGS reference at sale time: batch unit cost, else any in-stock row cost, else 0
+     * (avoids blocking checkout when legacy rows lack batch.unit_cost).
+     */
     async getBatchCost(batchId: number, organizationId: number): Promise<number> {
         const batch = await this.batchService.findOne(batchId, organizationId);
-        if (!batch.unit_cost) {
-            throw new AppError('Batch unit cost not set', 400);
+        const batchCost = batch.unit_cost != null ? Number(batch.unit_cost) : NaN;
+        if (Number.isFinite(batchCost) && batchCost > 0) {
+            return batchCost;
         }
-        return Number(batch.unit_cost);
+
+        const row = await this.stockRepository
+            .createQueryBuilder('stock')
+            .select('stock.unit_cost', 'unit_cost')
+            .where('stock.batch_id = :batchId', { batchId })
+            .andWhere('stock.organization_id = :organizationId', { organizationId })
+            .andWhere('stock.is_deleted = :isDeleted', { isDeleted: false })
+            .andWhere('stock.unit_cost IS NOT NULL')
+            .orderBy('stock.id', 'ASC')
+            .limit(1)
+            .getRawOne<{ unit_cost?: string | number }>();
+
+        const fromStock = row?.unit_cost != null ? Number(row.unit_cost) : NaN;
+        if (Number.isFinite(fromStock) && fromStock > 0) {
+            return fromStock;
+        }
+
+        return 0;
     }
 
     /**
@@ -978,9 +1006,10 @@ export class StockService {
             .where('stock.facility_id = :facilityId', { facilityId })
             .andWhere('stock.organization_id = :organizationId', { organizationId })
             .andWhere('stock.medicine_id = :medicineId', { medicineId })
-            .andWhere('stock.quantity > 0')
+            .andWhere('(stock.quantity - COALESCE(stock.reserved_quantity, 0)) > 0')
             .andWhere('stock.is_deleted = :isDeleted', { isDeleted: false })
             .orderBy('batch.expiry_date', 'ASC')
+            .addOrderBy('stock.id', 'ASC')
             .getOne();
 
         return result ? result.batch : null;

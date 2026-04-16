@@ -136,9 +136,9 @@ export function getAlertActionTarget(alert: Alert): AlertActionTarget | null {
             };
         case 'reorder_suggestion':
             return {
-                label: 'Open Reorder Dashboard',
-                to: '/app/reorder-dashboard',
-                description: 'Review forecasted stockout risk and generate draft purchase orders.',
+                label: 'Open replenishment',
+                to: '/app/replenish',
+                description: 'Review suggestions and generate draft purchase orders.',
             };
         case 'expiry_soon':
         case 'expired':

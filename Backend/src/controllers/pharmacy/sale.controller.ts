@@ -46,11 +46,12 @@ export class SaleController {
                 shouldReleaseInFlight = true;
             }
 
-            const sale = await this.saleService.createSale(req.body, cashierId, facilityId, organizationId);
+            const { sale, warnings } = await this.saleService.createSale(req.body, cashierId, facilityId, organizationId);
             const responseBody = {
                 success: true,
                 message: 'Sale created successfully',
                 data: sale,
+                ...(warnings.length > 0 ? { warnings } : {}),
                 timestamp: new Date().toISOString(),
             };
             if (idemKey) {

@@ -20,6 +20,7 @@ jest.mock('../batch.service', () => ({
     BatchService: jest.fn().mockImplementation(() => ({
         decreaseQuantity: jest.fn(),
         increaseQuantity: jest.fn(),
+        findOne: jest.fn(),
     })),
 }));
 
@@ -224,6 +225,52 @@ describe('StockService', () => {
 
             await expect(stockService.deductStock(1, 1, 10)).rejects.toThrow(AppError);
             await expect(stockService.deductStock(1, 1, 10)).rejects.toThrow('Stock is currently frozen');
+        });
+    });
+
+    describe('getBatchCost', () => {
+        it('returns batch unit_cost when set', async () => {
+            const batchSvc = (stockService as any).batchService;
+            batchSvc.findOne.mockResolvedValue({ id: 1, unit_cost: 42.5 });
+
+            const cost = await stockService.getBatchCost(1, 1);
+            expect(cost).toBe(42.5);
+        });
+
+        it('falls back to stock row unit_cost when batch cost missing', async () => {
+            const batchSvc = (stockService as any).batchService;
+            batchSvc.findOne.mockResolvedValue({ id: 1, unit_cost: null });
+
+            const qb = {
+                select: jest.fn().mockReturnThis(),
+                where: jest.fn().mockReturnThis(),
+                andWhere: jest.fn().mockReturnThis(),
+                orderBy: jest.fn().mockReturnThis(),
+                limit: jest.fn().mockReturnThis(),
+                getRawOne: jest.fn().mockResolvedValue({ unit_cost: '7.25' }),
+            };
+            mockStockRepository.createQueryBuilder.mockReturnValue(qb);
+
+            const cost = await stockService.getBatchCost(1, 1);
+            expect(cost).toBe(7.25);
+        });
+
+        it('returns 0 when no cost on batch or stock', async () => {
+            const batchSvc = (stockService as any).batchService;
+            batchSvc.findOne.mockResolvedValue({ id: 1, unit_cost: 0 });
+
+            const qb = {
+                select: jest.fn().mockReturnThis(),
+                where: jest.fn().mockReturnThis(),
+                andWhere: jest.fn().mockReturnThis(),
+                orderBy: jest.fn().mockReturnThis(),
+                limit: jest.fn().mockReturnThis(),
+                getRawOne: jest.fn().mockResolvedValue(null),
+            };
+            mockStockRepository.createQueryBuilder.mockReturnValue(qb);
+
+            const cost = await stockService.getBatchCost(1, 1);
+            expect(cost).toBe(0);
         });
     });
 

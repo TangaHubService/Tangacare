@@ -23,6 +23,10 @@ import { createAnalyticsRoutes } from './modules/analytics.routes';
 const MainLayout = lazyNamed(() => import('../components/layout/MainLayout'), 'MainLayout');
 const AuthLayout = lazyNamed(() => import('../components/layout/AuthLayout'), 'AuthLayout');
 const DashboardPage = lazyNamed(() => import('../pages/dashboard/DashboardPage'), 'DashboardPage');
+const ManagementOverviewPage = lazyNamed(
+    () => import('../pages/dashboard/ManagementOverviewPage'),
+    'ManagementOverviewPage',
+);
 const LandingPage = lazyNamed(() => import('../pages/marketing/LandingPage'), 'LandingPage');
 const DocsPage = lazyNamed(() => import('../pages/marketing/DocsPage'), 'DocsPage');
 const PrivacyPolicyPage = lazyNamed(
@@ -135,6 +139,18 @@ const indexRoute = createRoute({
     component: () => withRouteSuspense(<DashboardPage />),
 });
 
+const managementOverviewRoute = createRoute({
+    getParentRoute: () => appLayoutRoute,
+    path: 'overview',
+    component: () => withRouteSuspense(<ManagementOverviewPage />),
+});
+
+const orderReceiveRoute = createRoute({
+    getParentRoute: () => appLayoutRoute,
+    path: 'order-receive',
+    component: () => <Navigate to={'/app/procurement/orders' as any} search={{} as any} replace />,
+});
+
 const alertsRoute = createRoute({
     getParentRoute: () => appLayoutRoute,
     path: 'alerts',
@@ -189,6 +205,8 @@ const billingRoute = createRoute({
 
 const appRouteTree = appLayoutRoute.addChildren([
     indexRoute,
+    managementOverviewRoute,
+    orderReceiveRoute,
     alertsRoute,
     employeeRoute,
     onboardingRoute,

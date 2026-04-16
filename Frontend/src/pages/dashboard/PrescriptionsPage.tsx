@@ -37,7 +37,7 @@ export function PrescriptionsPage() {
                         </p>
                     </div>
                     <Link
-                        to={'/app/dispensing' as any}
+                        to={'/app/sell' as any}
                         search={{} as any}
                         className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-healthcare-primary text-white text-xs font-black uppercase tracking-wider hover:bg-teal-700 transition-colors"
                     >

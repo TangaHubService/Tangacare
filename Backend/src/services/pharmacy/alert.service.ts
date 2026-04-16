@@ -542,9 +542,13 @@ export class AlertService {
         const query = this.stockRepository
             .createQueryBuilder('stock')
             .select('stock.medicine_id', 'medicine_id')
-            .addSelect('SUM(stock.quantity)', 'total_quantity')
+            .addSelect(
+                'SUM(GREATEST(0, stock.quantity - COALESCE(stock.reserved_quantity, 0)))',
+                'total_quantity',
+            )
             .where('stock.facility_id = :facilityId', { facilityId })
             .andWhere('stock.organization_id = :organizationId', { organizationId })
+            .andWhere('stock.is_deleted = :isDeleted', { isDeleted: false })
             .groupBy('stock.medicine_id');
 
         if (medicineId) {
@@ -574,7 +578,7 @@ export class AlertService {
                 alertsToSync.push({
                     medicine_id: medicineRef,
                     title: totalQuantity === 0 ? 'OUT OF STOCK' : 'Low Stock Alert',
-                    message: `Medicine ${medicine.name} is ${totalQuantity === 0 ? 'out of stock' : 'running low'}. Current: ${totalQuantity}, Min: ${threshold}.`,
+                    message: `Medicine ${medicine.name} is ${totalQuantity === 0 ? 'out of stock' : 'running low'}. Available: ${totalQuantity}, Min: ${threshold}.`,
                     current_value: totalQuantity,
                     threshold_value: threshold,
                     severity,
@@ -600,7 +604,7 @@ export class AlertService {
                     alertsToSync.push({
                         medicine_id: medicineId,
                         title: 'OUT OF STOCK',
-                        message: `Medicine ${medicine.name} is out of stock. Current: 0, Min: ${threshold}.`,
+                        message: `Medicine ${medicine.name} is out of stock. Available: 0, Min: ${threshold}.`,
                         current_value: 0,
                         threshold_value: threshold,
                         severity: 'out_of_stock',
@@ -665,6 +669,7 @@ export class AlertService {
             where: {
                 facility_id: facilityId,
                 organization_id: organizationId,
+                is_deleted: false,
                 quantity: MoreThan(0),
                 batch: {
                     expiry_date: LessThan(maxThreshold),

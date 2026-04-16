@@ -1,7 +1,8 @@
-// Define mock instances at the top Level (hoisted with jest.mock)
 const mockStockServiceInstance = {
     getStockByLocation: jest.fn(),
     deductStock: jest.fn(),
+    getEarliestExpiringBatch: jest.fn(),
+    checkStockAvailability: jest.fn(),
 };
 
 const mockAuditServiceInstance = {
@@ -12,10 +13,15 @@ const mockSettingsServiceInstance = {
     getEffectiveValuesMap: jest.fn().mockResolvedValue({}),
 };
 
+const mockCreateSale = jest.fn();
+
 jest.mock('../../../config/database', () => ({
     AppDataSource: {
         getRepository: jest.fn(),
         createQueryRunner: jest.fn(),
+        manager: {
+            findOne: jest.fn(),
+        },
     },
 }));
 
@@ -23,6 +29,11 @@ jest.mock('../stock.service');
 jest.mock('../audit.service');
 jest.mock('../safety.service');
 jest.mock('../settings.service');
+jest.mock('../sale.service', () => ({
+    SaleService: jest.fn().mockImplementation(() => ({
+        createSale: mockCreateSale,
+    })),
+}));
 
 import { DispensingService } from '../dispensing.service';
 import { AppDataSource } from '../../../config/database';
@@ -31,6 +42,7 @@ import { CreateDispenseTransactionDto } from '../../../dto/pharmacy.dto';
 import { DispenseType } from '../../../entities/DispenseTransaction.entity';
 import { Medicine } from '../../../entities/Medicine.entity';
 import { Batch } from '../../../entities/Batch.entity';
+import { User } from '../../../entities/User.entity';
 import { StockService } from '../stock.service';
 import { AuditService } from '../audit.service';
 import { SafetyService } from '../safety.service';
@@ -39,10 +51,9 @@ import { SettingsService } from '../settings.service';
 describe('DispensingService', () => {
     let dispensingService: DispensingService;
     let mockDispenseRepository: any;
-    let mockQueryRunner: any;
-    let mockSafetyServiceInstance: any;
 
     beforeEach(() => {
+        mockCreateSale.mockReset();
         mockDispenseRepository = {
             create: jest.fn(),
             save: jest.fn(),
@@ -50,54 +61,69 @@ describe('DispensingService', () => {
             createQueryBuilder: jest.fn(),
         };
 
-        mockQueryRunner = {
-            connect: jest.fn(),
-            startTransaction: jest.fn(),
-            manager: {
-                save: jest.fn(),
-                findOne: jest.fn(),
-            },
-            commitTransaction: jest.fn(),
-            rollbackTransaction: jest.fn(),
-            release: jest.fn(),
-            isTransactionActive: true,
-        };
-
         (StockService as any as jest.Mock).mockImplementation(() => mockStockServiceInstance);
         (AuditService as any as jest.Mock).mockImplementation(() => mockAuditServiceInstance);
         (SettingsService as any as jest.Mock).mockImplementation(() => mockSettingsServiceInstance);
-        mockSafetyServiceInstance = {
+        (SafetyService as any as jest.Mock).mockImplementation(() => ({
             performSafetyCheck: jest.fn().mockResolvedValue({
                 is_safe: true,
                 warnings: [],
                 errors: [],
             }),
-        };
-        (SafetyService as any as jest.Mock).mockImplementation(() => mockSafetyServiceInstance);
+        }));
 
         (AppDataSource.getRepository as jest.Mock).mockImplementation((entity) => {
             const name = typeof entity === 'function' ? entity.name : entity;
             if (name === 'DispenseTransaction') return mockDispenseRepository;
             return mockDispenseRepository;
         });
-        (AppDataSource.createQueryRunner as jest.Mock).mockReturnValue(mockQueryRunner);
 
-        mockQueryRunner.manager.findOne.mockImplementation((entity: any) => {
-            if (entity === Medicine) return Promise.resolve({ id: 1, name: 'Medicine', is_controlled_drug: false });
+        (AppDataSource.manager.findOne as jest.Mock).mockImplementation((entity: any) => {
+            if (entity === Medicine)
+                return Promise.resolve({ id: 1, name: 'Medicine', is_controlled_drug: false });
             if (entity === Batch)
                 return Promise.resolve({
                     id: 1,
-                    id_deleted: false,
                     batch_number: 'BATCH-001',
                     expiry_date: new Date(Date.now() + 86400000),
                 });
+            if (entity === User) return Promise.resolve({ id: 1, role: 'admin', license_number: 'LIC-1' });
             return Promise.resolve(null);
         });
 
         dispensingService = new DispensingService();
-        mockStockServiceInstance.getStockByLocation.mockResolvedValue([]);
-        mockStockServiceInstance.deductStock.mockResolvedValue({});
+        mockStockServiceInstance.getStockByLocation.mockReset();
+        mockStockServiceInstance.deductStock.mockReset();
+        mockStockServiceInstance.getEarliestExpiringBatch.mockReset();
+        mockStockServiceInstance.checkStockAvailability.mockReset();
         mockAuditServiceInstance.log.mockResolvedValue(undefined);
+
+        mockCreateSale.mockResolvedValue({
+            sale: {
+                id: 42,
+                sale_number: 'SALE-2024-0001',
+                facility_id: 1,
+                organization_id: 1,
+                patient_id: 1,
+                prescription_id: 1,
+                cashier_id: 1,
+                patient_id_type: null,
+                patient_id_number: null,
+                total_amount: 1000,
+                created_at: new Date(),
+                updated_at: new Date(),
+                items: [
+                    {
+                        medicine_id: 1,
+                        batch_id: 1,
+                        quantity: 10,
+                        unit_price: 100,
+                        unit_cost: 50,
+                    },
+                ],
+            },
+            warnings: [],
+        });
     });
 
     afterEach(() => {
@@ -107,6 +133,7 @@ describe('DispensingService', () => {
     describe('dispense', () => {
         const createDto: CreateDispenseTransactionDto = {
             facility_id: 1,
+            organization_id: 1,
             medicine_id: 1,
             batch_id: 1,
             quantity: 10,
@@ -115,12 +142,7 @@ describe('DispensingService', () => {
             prescription_id: 1,
         };
 
-        it('should dispense medicine successfully using FEFO', async () => {
-            const dispenseDtoWithoutBatch: CreateDispenseTransactionDto = {
-                ...createDto,
-                batch_id: undefined as any,
-            };
-
+        it('should record legacy dispense via createSale (unified ledger)', async () => {
             const availableStocks = [
                 {
                     id: 1,
@@ -130,58 +152,31 @@ describe('DispensingService', () => {
                     quantity: 100,
                     reserved_quantity: 0,
                     unit_price: 100,
+                    unit_cost: 50,
                 },
             ];
 
             mockStockServiceInstance.getStockByLocation.mockResolvedValue(availableStocks);
-            mockStockServiceInstance.deductStock.mockResolvedValue({ ...availableStocks[0], quantity: 90 });
 
-            mockDispenseRepository.createQueryBuilder.mockReturnValue({
-                where: jest.fn().mockReturnThis(),
-                andWhere: jest.fn().mockReturnThis(),
-                getCount: jest.fn().mockResolvedValue(0),
-                getMany: jest.fn().mockResolvedValue([]),
-            });
+            const result = await dispensingService.dispense(createDto, 1);
 
-            const savedTransaction = {
-                id: 1,
-                transaction_number: 'DISP-2024-0001',
-                ...dispenseDtoWithoutBatch,
-                batch_id: 1,
-                total_amount: 1000,
-            };
-
-            mockQueryRunner.manager.save.mockResolvedValue(savedTransaction);
-
-            const result = await dispensingService.dispense(dispenseDtoWithoutBatch, 1);
-
-            expect(mockStockServiceInstance.getStockByLocation).toHaveBeenCalled();
-            expect(mockStockServiceInstance.deductStock).toHaveBeenCalled();
-            expect(mockQueryRunner.commitTransaction).toHaveBeenCalled();
-            expect(result.transaction_number).toBeDefined();
+            expect(mockCreateSale).toHaveBeenCalled();
+            expect(result.transaction_number).toBe('SALE-2024-0001');
+            expect(result.id).toBe(42);
+            expect(mockAuditServiceInstance.log).toHaveBeenCalled();
         });
 
         it('should throw error if no stock available', async () => {
-            const dispenseDtoWithoutBatch: CreateDispenseTransactionDto = {
-                ...createDto,
-                batch_id: undefined as any,
-            };
             mockStockServiceInstance.getStockByLocation.mockResolvedValue([]);
 
-            await expect(dispensingService.dispense(dispenseDtoWithoutBatch, 1)).rejects.toThrow(AppError);
-            await expect(dispensingService.dispense(dispenseDtoWithoutBatch, 1)).rejects.toThrow(
+            await expect(dispensingService.dispense(createDto, 1)).rejects.toThrow(AppError);
+            await expect(dispensingService.dispense(createDto, 1)).rejects.toThrow(
                 'No stock available for this medicine at this location',
             );
-            expect(mockQueryRunner.rollbackTransaction).toHaveBeenCalled();
+            expect(mockCreateSale).not.toHaveBeenCalled();
         });
 
         it('should throw error if insufficient stock', async () => {
-            const dispenseDtoWithoutBatch: CreateDispenseTransactionDto = {
-                ...createDto,
-                batch_id: undefined as any,
-                quantity: 10,
-            };
-
             const availableStocks = [
                 {
                     id: 1,
@@ -196,8 +191,9 @@ describe('DispensingService', () => {
 
             mockStockServiceInstance.getStockByLocation.mockResolvedValue(availableStocks);
 
-            await expect(dispensingService.dispense(dispenseDtoWithoutBatch, 1)).rejects.toThrow(AppError);
-            await expect(dispensingService.dispense(dispenseDtoWithoutBatch, 1)).rejects.toThrow('Insufficient stock');
+            await expect(dispensingService.dispense(createDto, 1)).rejects.toThrow(AppError);
+            await expect(dispensingService.dispense(createDto, 1)).rejects.toThrow('Insufficient stock');
+            expect(mockCreateSale).not.toHaveBeenCalled();
         });
     });
 

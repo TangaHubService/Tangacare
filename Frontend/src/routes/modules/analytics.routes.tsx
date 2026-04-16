@@ -42,7 +42,7 @@ export const createAnalyticsRoutes = (parentRoute: any) => {
         path: 'intelligence',
         component: () => {
             const Nav = Navigate as any;
-            return <Nav to="/app/analytics/fast-moving" search={{}} />;
+            return <Nav to="/app/replenish" search={{}} replace />;
         },
     });
 
@@ -118,7 +118,10 @@ export const createAnalyticsRoutes = (parentRoute: any) => {
     const analyticsLowStockRoute = createRoute({
         getParentRoute: () => analyticsRoute,
         path: 'low-stock',
-        component: () => withRouteSuspense(<ReportsPage defaultTab="stock-analytics" />),
+        component: () => {
+            const Nav = Navigate as any;
+            return <Nav to="/app/analytics/inventory" search={{}} replace />;
+        },
     });
 
     const analyticsMovementRoute = createRoute({
@@ -139,13 +142,19 @@ export const createAnalyticsRoutes = (parentRoute: any) => {
     const analyticsDemandForecastRoute = createRoute({
         getParentRoute: () => analyticsRoute,
         path: 'demand-forecast',
-        component: () => withRouteSuspense(<ReportsPage defaultTab="demand-forecast" />),
+        component: () => {
+            const Nav = Navigate as any;
+            return <Nav to="/app/replenish" search={{}} replace />;
+        },
     });
 
     const analyticsForecastReorderRoute = createRoute({
         getParentRoute: () => analyticsRoute,
         path: 'forecast-reorder',
-        component: () => withRouteSuspense(<ReportsPage defaultTab="forecast-reorder" />),
+        component: () => {
+            const Nav = Navigate as any;
+            return <Nav to="/app/replenish" search={{}} replace />;
+        },
     });
 
     const analyticsNearExpiryActionsRoute = createRoute({
@@ -160,7 +169,10 @@ export const createAnalyticsRoutes = (parentRoute: any) => {
     const analyticsParRoute = createRoute({
         getParentRoute: () => analyticsRoute,
         path: 'par',
-        component: () => withRouteSuspense(<ReportsPage defaultTab="par" />),
+        component: () => {
+            const Nav = Navigate as any;
+            return <Nav to="/app/replenish" search={{}} replace />;
+        },
     });
 
     const analyticsAuditLogsRoute = createRoute({

@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useRef } from 'react';
 import { CheckCircle2, Loader2 } from 'lucide-react';
 import { pharmacyService } from '../../services/pharmacy.service';
 import type { ProcurementOrder } from '../../types/pharmacy';
@@ -13,7 +13,13 @@ interface ReceiveOrderModalProps {
     order: ProcurementOrder | null;
 }
 
+const RECEIVE_WIZARD_STEPS = ['Quantities & backorders', 'Batch, dates & locations', 'Review & confirm'] as const;
+
 export function ReceiveOrderModal({ isOpen, onClose, onSuccess, order }: ReceiveOrderModalProps) {
+    const [wizardStep, setWizardStep] = useState(0);
+    const scrollAreaRef = useRef<HTMLDivElement | null>(null);
+    const detailSectionRef = useRef<HTMLDivElement | null>(null);
+    const footerRef = useRef<HTMLDivElement | null>(null);
     const [loading, setLoading] = useState(false);
     const [receivedItems, setReceivedItems] = useState<any[]>([]);
     const [locations, setLocations] = useState<any[]>([]);
@@ -33,6 +39,7 @@ export function ReceiveOrderModal({ isOpen, onClose, onSuccess, order }: Receive
 
     useEffect(() => {
         if (isOpen && order) {
+            setWizardStep(0);
             fetchLocations();
             setReceivedItems(
                 order.items?.map((item) => ({
@@ -57,6 +64,17 @@ export function ReceiveOrderModal({ isOpen, onClose, onSuccess, order }: Receive
             );
         }
     }, [isOpen, order]);
+
+    useEffect(() => {
+        if (!isOpen) return;
+        if (wizardStep === 0) {
+            scrollAreaRef.current?.scrollTo({ top: 0, behavior: 'smooth' });
+        } else if (wizardStep === 1) {
+            detailSectionRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+        } else {
+            footerRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+        }
+    }, [wizardStep, isOpen]);
 
     const applyGlobalLocation = (locationId: number | null) => {
         setGlobalLocationId(locationId);
@@ -314,7 +332,41 @@ export function ReceiveOrderModal({ isOpen, onClose, onSuccess, order }: Receive
                     </div>
                 </div>
 
-                <div className="flex-1 overflow-y-auto p-3 sm:p-6 space-y-3">
+                <div className="px-4 py-3 border-b border-slate-200 dark:border-slate-800 bg-slate-50/90 dark:bg-slate-800/50 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+                    <div>
+                        <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">
+                            Receive wizard
+                        </p>
+                        <p className="text-sm font-bold text-slate-800 dark:text-slate-100">
+                            Step {wizardStep + 1} of {RECEIVE_WIZARD_STEPS.length}:{' '}
+                            {RECEIVE_WIZARD_STEPS[wizardStep]}
+                        </p>
+                    </div>
+                    <div className="flex gap-2">
+                        <button
+                            type="button"
+                            disabled={wizardStep === 0}
+                            onClick={() => setWizardStep((s) => Math.max(0, s - 1))}
+                            className="h-10 px-4 rounded-xl text-[10px] font-black uppercase tracking-widest bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-600 text-slate-600 disabled:opacity-40"
+                        >
+                            Back
+                        </button>
+                        <button
+                            type="button"
+                            disabled={wizardStep >= RECEIVE_WIZARD_STEPS.length - 1}
+                            onClick={() =>
+                                setWizardStep((s) =>
+                                    Math.min(RECEIVE_WIZARD_STEPS.length - 1, s + 1),
+                                )
+                            }
+                            className="h-10 px-4 rounded-xl text-[10px] font-black uppercase tracking-widest bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-40"
+                        >
+                            Next
+                        </button>
+                    </div>
+                </div>
+
+                <div ref={scrollAreaRef} className="flex-1 overflow-y-auto p-3 sm:p-6 space-y-3">
                     <div className="space-y-3 lg:hidden">
                         {receivedItems.map((item, idx) => {
                             const isReceiving = item.quantity_received > 0;
@@ -493,7 +545,7 @@ export function ReceiveOrderModal({ isOpen, onClose, onSuccess, order }: Receive
                         })}
                     </div>
 
-                    <div className="hidden lg:block overflow-x-auto">
+                    <div ref={detailSectionRef} className="hidden lg:block overflow-x-auto">
                         <table className="tc-table w-full text-left border-collapse">
                             <thead>
                                 <tr className="border-b-2 border-slate-100 dark:border-slate-800">
@@ -678,7 +730,10 @@ export function ReceiveOrderModal({ isOpen, onClose, onSuccess, order }: Receive
                     </div>
                 </div>
 
-                <div className="sticky bottom-0 p-4 sm:p-6 border-t border-slate-200 dark:border-slate-800 bg-white/95 dark:bg-slate-900/95 backdrop-blur flex flex-col-reverse sm:flex-row sm:justify-end gap-2 sm:gap-3">
+                <div
+                    ref={footerRef}
+                    className="sticky bottom-0 p-4 sm:p-6 border-t border-slate-200 dark:border-slate-800 bg-white/95 dark:bg-slate-900/95 backdrop-blur flex flex-col-reverse sm:flex-row sm:justify-end gap-2 sm:gap-3"
+                >
                     <button
                         onClick={onClose}
                         className="h-11 px-6 w-full sm:w-auto bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl font-black text-xs text-slate-500 hover:bg-slate-50 transition-all uppercase tracking-widest touch-manipulation"

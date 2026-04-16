@@ -3,6 +3,7 @@ import PDFDocument from 'pdfkit';
 import { AppDataSource } from '../../config/database';
 import { AppError } from '../../middleware/error.middleware';
 import { Sale, SaleItem, SalePayment, SalePaymentMethod, SaleStatus } from '../../entities/Sale.entity';
+import { User, UserRole } from '../../entities/User.entity';
 import { Batch } from '../../entities/Batch.entity';
 import { InsuranceProvider } from '../../entities/InsuranceProvider.entity';
 import { CreateSaleDto } from '../../dto/pharmacy.dto';
@@ -17,10 +18,16 @@ import { applyScope } from '../../utils/scope.util';
 import { AuthRequest } from '../../middleware/auth.middleware';
 import { SettingsService } from './settings.service';
 import { SETTINGS_KEYS } from './settings.constants';
+import { hasPermission, PERMISSIONS } from '../../config/permissions';
 import { PdfBrandingUtil } from '../../utils/pdf-branding.util';
 import { roundMoney, formatMoney as formatMoneyUtil } from '../../utils/money.util';
 
 
+export interface CreateSaleResult {
+    sale: Sale;
+    /** Non-blocking notices for the client (e.g. missing COGS). */
+    warnings: string[];
+}
 
 export class SaleService {
     private saleRepository: Repository<Sale>;
@@ -33,12 +40,18 @@ export class SaleService {
         return generateDocumentNumber('SALE');
     }
 
-    async createSale(createDto: CreateSaleDto, cashierId: number, facilityId: number, organizationId: number): Promise<Sale> {
+    async createSale(
+        createDto: CreateSaleDto,
+        cashierId: number,
+        facilityId: number,
+        organizationId: number,
+    ): Promise<CreateSaleResult> {
         return await AppDataSource.transaction(async (transactionalEntityManager) => {
             const saleRepo = transactionalEntityManager.getRepository(Sale);
             const saleItemRepo = transactionalEntityManager.getRepository(SaleItem);
             const salePaymentRepo = transactionalEntityManager.getRepository(SalePayment);
             const batchRepo = transactionalEntityManager.getRepository(Batch);
+            const userRepo = transactionalEntityManager.getRepository(User);
 
             // Initialize services with the transaction manager
             const stockService = new StockService(transactionalEntityManager);
@@ -62,6 +75,13 @@ export class SaleService {
             const defaultCurrency =
                 (SettingsService.systemDefaultValue(SETTINGS_KEYS.CURRENCY_BASE) as string) ?? 'RWF';
             const currencyCode = String(effectiveSettings[SETTINGS_KEYS.CURRENCY_BASE] || defaultCurrency);
+
+            const cashierUser = await userRepo.findOne({ where: { id: cashierId } });
+            const cashierRole = (cashierUser?.role as UserRole | undefined) ?? undefined;
+            const allowFefoOverride =
+                Boolean(createDto.fefo_override_reason?.trim()) &&
+                !!cashierRole &&
+                hasPermission(cashierRole, PERMISSIONS.INVENTORY_WRITE);
 
             if (!createDto.items || createDto.items.length === 0) {
                 throw new AppError('Sale must have at least one item', 400);
@@ -183,20 +203,33 @@ export class SaleService {
                     earliestBatch.id !== batchId &&
                     new Date(earliestBatch.expiry_date) < new Date(batch.expiry_date)
                 ) {
-                    await auditService.log({
-                        facility_id: facilityId,
-                        user_id: cashierId,
-                        organization_id: organizationId,
-                        action: AuditAction.FEFO_VIOLATION,
-                        entity_type: AuditEntityType.SALE,
-                        entity_id: 0, // No sale created yet
-                        entity_name: 'FEFO Violation',
-                        description: `FEFO VIOLATION: Selected Batch ${batch.batch_number} (Exp: ${new Date(batch.expiry_date).toLocaleDateString()}), available earlier Batch ${earliestBatch.batch_number} (Exp: ${new Date(earliestBatch.expiry_date).toLocaleDateString()})`,
-                    });
-                    throw new AppError(
-                        `FEFO rule: use batch ${earliestBatch.batch_number} (earlier expiry) before ${batch.batch_number}`,
-                        409,
-                    );
+                    if (allowFefoOverride) {
+                        await auditService.log({
+                            facility_id: facilityId,
+                            user_id: cashierId,
+                            organization_id: organizationId,
+                            action: AuditAction.UPDATE,
+                            entity_type: AuditEntityType.SALE,
+                            entity_id: 0,
+                            entity_name: 'FEFO override',
+                            description: `FEFO override (sale): ${String(createDto.fefo_override_reason).trim()} | Using ${batch.batch_number} (exp ${new Date(batch.expiry_date).toLocaleDateString()}) instead of ${earliestBatch.batch_number} (exp ${new Date(earliestBatch.expiry_date).toLocaleDateString()})`,
+                        });
+                    } else {
+                        await auditService.log({
+                            facility_id: facilityId,
+                            user_id: cashierId,
+                            organization_id: organizationId,
+                            action: AuditAction.FEFO_VIOLATION,
+                            entity_type: AuditEntityType.SALE,
+                            entity_id: 0, // No sale created yet
+                            entity_name: 'FEFO Violation',
+                            description: `FEFO VIOLATION: Selected Batch ${batch.batch_number} (Exp: ${new Date(batch.expiry_date).toLocaleDateString()}), available earlier Batch ${earliestBatch.batch_number} (Exp: ${new Date(earliestBatch.expiry_date).toLocaleDateString()})`,
+                        });
+                        throw new AppError(
+                            `FEFO rule: use batch ${earliestBatch.batch_number} (earlier expiry) before ${batch.batch_number}`,
+                            409,
+                        );
+                    }
                 }
 
                 const isAvailable = item.stock_id
@@ -275,6 +308,7 @@ export class SaleService {
             });
 
             const savedSale = await saleRepo.save(sale);
+            let anyLineMissingCogs = false;
 
             // Process each sale item
             for (const item of createDto.items) {
@@ -308,6 +342,9 @@ export class SaleService {
 
                 // 1. Get batch cost for COGS (capture at sale time, not report time)
                 const unitCost = await stockService.getBatchCost(batchId, organizationId);
+                if (unitCost === 0) {
+                    anyLineMissingCogs = true;
+                }
 
                 // 2. Create sale item with COGS
                 const saleItem = saleItemRepo.create({
@@ -420,7 +457,15 @@ export class SaleService {
             });
 
             if (!result) throw new AppError('Sale not found after creation', 500);
-            return result;
+
+            const warnings: string[] = [];
+            if (anyLineMissingCogs) {
+                warnings.push(
+                    'Some items had no unit cost on file; COGS was saved as 0. Update batch or stock costs for accurate margin reporting.',
+                );
+            }
+
+            return { sale: result, warnings };
         });
     }
 

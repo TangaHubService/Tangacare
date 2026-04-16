@@ -27,6 +27,18 @@ export const createSalesRoutes = (parentRoute: any) => {
             ),
     });
 
+    /** Pharmacy-first alias — same POS flow as `dispensing` (primary outbound stock path is `Sale` / createSale). */
+    const sellRoute = createRoute({
+        getParentRoute: () => parentRoute,
+        path: 'sell',
+        component: () =>
+            withRouteSuspense(
+                <RequirePermission permission={PERMISSIONS.DISPENSING_READ}>
+                    <DispensingPage />
+                </RequirePermission>,
+            ),
+    });
+
     const insuranceRoute = createRoute({
         getParentRoute: () => parentRoute,
         path: 'insurance',
@@ -49,5 +61,5 @@ export const createSalesRoutes = (parentRoute: any) => {
             ),
     });
 
-    return [dispensingRoute, insuranceRoute, prescriptionsRoute];
+    return [dispensingRoute, sellRoute, insuranceRoute, prescriptionsRoute];
 };

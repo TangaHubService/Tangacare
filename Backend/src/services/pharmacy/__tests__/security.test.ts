@@ -16,16 +16,32 @@ jest.mock('../../../config/database', () => ({
 
 jest.mock('../stock.service');
 jest.mock('../audit.service');
-jest.mock('../settings.service', () => ({
-    SettingsService: jest.fn().mockImplementation(() => ({
+jest.mock('../settings.service', () => {
+    const SettingsService = jest.fn().mockImplementation(() => ({
         getEffectiveValuesMap: jest.fn().mockResolvedValue({
             'inventory_rules.fefo_strict': true,
             'tax_fiscal.vat_enabled': true,
+            'currency_pricing.base_currency': 'RWF',
         }),
         normalizeVatRateToDecimal: jest.fn().mockResolvedValue(0.18),
         getEffectiveValue: jest.fn().mockResolvedValue('RWF'),
-    })),
-}));
+        getRuntimeConfig: jest.fn().mockResolvedValue({
+            currencyDecimals: 2,
+            currencyCode: 'RWF',
+            currencySymbol: 'RWF',
+            currencyRoundingMode: 'half_up',
+            maxDiscountPercent: 20,
+            vatEnabled: true,
+            vatRate: 0.18,
+            locale: 'en-RW',
+            timezone: 'Africa/Kigali',
+            dateFormat: 'DD/MM/YYYY',
+            numberFormat: '1,234.56',
+        }),
+    }));
+    (SettingsService as any).systemDefaultValue = jest.fn(() => 'RWF');
+    return { SettingsService };
+});
 
 const StockService = require('../stock.service').StockService;
 const AuditService = require('../audit.service').AuditService;

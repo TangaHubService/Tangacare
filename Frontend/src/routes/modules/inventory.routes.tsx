@@ -122,15 +122,21 @@ export const createInventoryRoutes = (parentRoute: any) => {
             ),
     });
 
-    const reorderRoute = createRoute({
+    const replenishRoute = createRoute({
         getParentRoute: () => parentRoute,
-        path: 'reorder-dashboard',
+        path: 'replenish',
         component: () =>
             withRouteSuspense(
                 <RequirePermission permission={PERMISSIONS.PROCUREMENT_READ}>
                     <ReorderDashboardPage />
                 </RequirePermission>,
             ),
+    });
+
+    const reorderDashboardLegacyRoute = createRoute({
+        getParentRoute: () => parentRoute,
+        path: 'reorder-dashboard',
+        component: () => <Navigate to={'/app/replenish' as any} replace search={{} as any} />,
     });
 
     const stockRegisterRoute = createRoute({
@@ -147,7 +153,8 @@ export const createInventoryRoutes = (parentRoute: any) => {
         stocktakingRoute,
         variancesRoute,
         recallsRoute,
-        reorderRoute,
+        replenishRoute,
+        reorderDashboardLegacyRoute,
         stockRegisterRoute,
     ];
 };

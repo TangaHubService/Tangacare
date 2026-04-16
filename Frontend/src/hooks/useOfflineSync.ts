@@ -43,13 +43,18 @@ export function useOfflineSync() {
                 await db.saleQueue.update(sale.id!, { status: 'syncing' });
 
                 // Attempt sync with idempotency key
-                await pharmacyService.createSale(sale, {
+                const { warnings } = await pharmacyService.createSale(sale, {
                     headers: { 'idempotency-key': sale.offlineId },
                 });
 
                 // Mark as synced
                 await db.saleQueue.update(sale.id!, { status: 'synced' });
                 toast.success('Offline sale synced successfully');
+                if (warnings.length > 0) {
+                    for (const w of warnings) {
+                        toast(w, { duration: 7500, icon: '⚠️' });
+                    }
+                }
             } catch (error: any) {
                 console.error(`Failed to sync sale ${sale.offlineId}:`, error);
                 await db.saleQueue.update(sale.id!, {

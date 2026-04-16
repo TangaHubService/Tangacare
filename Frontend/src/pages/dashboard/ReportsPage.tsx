@@ -1,4 +1,6 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
+import { Link } from '@tanstack/react-router';
 import {
     TrendingUp,
     Calendar,
@@ -9,6 +11,12 @@ import {
     DollarSign,
     RotateCcw,
     Search,
+    ChevronDown,
+    Receipt,
+    BarChart2,
+    Users,
+    RefreshCw,
+    SlidersHorizontal,
 } from 'lucide-react';
 import { ProtectedRoute } from '../../components/auth/ProtectedRoute';
 import { SkeletonTable } from '../../components/ui/SkeletonTable';
@@ -20,14 +28,9 @@ import { format, subDays } from 'date-fns';
 import { cn } from '../../lib/utils';
 import { formatLocalDate, parseLocalDate } from '../../lib/date';
 
-import { ReorderSuggestions } from '../../components/pharmacy/reports/ReorderSuggestions';
 import { CreateReturnModal } from '../../components/pharmacy/returns/CreateReturnModal';
-import { ABCAnalysisReport } from '../../components/pharmacy/reports/ABCAnalysisReport';
 import { PurchaseReport } from '../../components/pharmacy/reports/PurchaseReport';
 import { FastSlowMovingReport } from '../../components/pharmacy/reports/FastSlowMovingReport';
-import { DemandForecastReport } from '../../components/pharmacy/reports/DemandForecastReport';
-import { ForecastReorderReport } from '../../components/pharmacy/reports/ForecastReorderReport';
-import { ParReplenishmentReport } from '../../components/pharmacy/reports/ParReplenishmentReport';
 import type { Medicine } from '../../types/pharmacy';
 import { toast } from 'react-hot-toast';
 
@@ -40,13 +43,41 @@ const VALID_REPORT_TABS = new Set([
     'stock',
     'purchase',
     'fast-moving',
-    'demand-forecast',
-    'forecast-reorder',
-    'par',
     'performance',
     'customer',
     'tax',
 ]);
+
+const SECONDARY_REPORT_ACTIONS = [
+    {
+        tab: 'tax',
+        to: '/app/analytics/tax',
+        label: 'Tax',
+        hint: 'VAT and taxable sales',
+        icon: Receipt,
+    },
+    {
+        tab: 'performance',
+        to: '/app/analytics/performance',
+        label: 'Staff',
+        hint: 'Sales by team member',
+        icon: BarChart2,
+    },
+    {
+        tab: 'customer',
+        to: '/app/analytics/loyalty',
+        label: 'Customers',
+        hint: 'Visits and spend',
+        icon: Users,
+    },
+    {
+        tab: '_replenish',
+        to: '/app/replenish',
+        label: 'Replenish',
+        hint: 'Suggestions & draft POs',
+        icon: RefreshCw,
+    },
+] as const;
 
 const SUBTAB_ALIASES: Record<string, string> = {
     profit: 'sales',
@@ -75,7 +106,6 @@ function resolveReportTab(defaultTab: string): string {
 }
 
 type SalesReportView = 'general' | 'purchase-vs-sales' | 'medicine-margin';
-type StockReportView = 'general' | 'analytics';
 
 const SALES_REPORT_VIEW_LABELS: Record<SalesReportView, string> = {
     general: 'General Sales',
@@ -83,37 +113,70 @@ const SALES_REPORT_VIEW_LABELS: Record<SalesReportView, string> = {
     'medicine-margin': 'Medicine Margin',
 };
 
-const STOCK_REPORT_VIEW_LABELS: Record<StockReportView, string> = {
-    general: 'General Stock Report',
-    analytics: 'Stock Analytics',
-};
-
-function resolveStockView(defaultTab: string): StockReportView {
-    return normalizeSubtab(defaultTab) === 'stock-analytics' ? 'analytics' : 'general';
+function getExportType(
+    tab: string,
+    activeSalesView: SalesReportView,
+):
+    | 'sales'
+    | 'purchase-vs-sales'
+    | 'medicine-margin'
+    | 'stock'
+    | 'fast-moving'
+    | 'purchase'
+    | 'performance'
+    | 'customer'
+    | 'tax'
+    | null {
+    if (tab === 'sales') {
+        if (activeSalesView === 'purchase-vs-sales') return 'purchase-vs-sales';
+        if (activeSalesView === 'medicine-margin') return 'medicine-margin';
+        return 'sales';
+    }
+    if (tab === 'stock') return 'stock';
+    if (tab === 'fast-moving') return 'fast-moving';
+    if (tab === 'purchase') return 'purchase';
+    if (tab === 'performance') return 'performance';
+    if (tab === 'customer') return 'customer';
+    if (tab === 'tax') return 'tax';
+    return null;
 }
 
 export function ReportsPage({ defaultTab = 'sales' }: ReportsPageProps) {
     const [startDate, setStartDate] = useState(format(subDays(new Date(), 30), 'yyyy-MM-dd'));
     const [endDate, setEndDate] = useState(format(new Date(), 'yyyy-MM-dd'));
     const [salesView, setSalesView] = useState<SalesReportView>('general');
-    const [stockView, setStockView] = useState<StockReportView>(() => resolveStockView(defaultTab));
+    const [exportMenuOpen, setExportMenuOpen] = useState(false);
+    const [moreMenuOpen, setMoreMenuOpen] = useState(false);
+    const moreButtonRef = useRef<HTMLButtonElement | null>(null);
+    const morePanelRef = useRef<HTMLDivElement | null>(null);
+    const exportButtonRef = useRef<HTMLButtonElement | null>(null);
+    const exportPanelRef = useRef<HTMLDivElement | null>(null);
+    const [moreMenuPlacement, setMoreMenuPlacement] = useState<{
+        top?: number;
+        bottom?: number;
+        right: number;
+        width: number;
+        maxHeight: number;
+        placeAbove: boolean;
+    } | null>(null);
+    const [exportMenuPlacement, setExportMenuPlacement] = useState<{
+        top?: number;
+        bottom?: number;
+        right: number;
+        width: number;
+        placeAbove: boolean;
+    } | null>(null);
     const { user, facilityId } = useAuth();
     const effectiveFacilityId = facilityId ?? user?.facility_id;
 
-    const SUBTAB_LABELS: Record<string, string> = {
-        sales: 'Sales',
-        stock: 'Stock',
-        'fast-moving': 'Fast/Slow',
-        'demand-forecast': 'Demand Forecast',
-        'forecast-reorder': 'Forecast Reorder',
-        par: 'PAR Replenishment',
-        purchase: 'Purchase',
-        performance: 'Performance',
-        customer: 'Customers',
-        tax: 'Tax',
-    };
-
     const resolvedTab = useMemo(() => resolveReportTab(defaultTab), [defaultTab]);
+
+    const moreMenuActiveLabel = useMemo(() => {
+        const hit = SECONDARY_REPORT_ACTIONS.find(
+            (a) => a.tab !== '_replenish' && resolvedTab === a.tab,
+        );
+        return hit?.label ?? null;
+    }, [resolvedTab]);
 
     useEffect(() => {
         if (resolvedTab !== 'sales') {
@@ -121,50 +184,127 @@ export function ReportsPage({ defaultTab = 'sales' }: ReportsPageProps) {
         }
     }, [resolvedTab]);
 
-    useEffect(() => {
-        if (resolvedTab === 'stock') {
-            setStockView(resolveStockView(defaultTab));
-        } else {
-            setStockView('general');
-        }
-    }, [defaultTab, resolvedTab]);
-
-    const getExportType = (
-        tab: string,
-        activeSalesView: SalesReportView,
-    ):
-        | 'sales'
-        | 'purchase-vs-sales'
-        | 'medicine-margin'
-        | 'stock'
-        | 'fast-moving'
-        | 'demand-forecast'
-        | 'forecast-reorder'
-        | 'par'
-        | 'purchase'
-        | 'performance'
-        | 'customer'
-        | 'tax'
-        | null => {
-        if (tab === 'sales') {
-            if (activeSalesView === 'purchase-vs-sales') return 'purchase-vs-sales';
-            if (activeSalesView === 'medicine-margin') return 'medicine-margin';
-            return 'sales';
-        }
-        if (tab === 'stock') return 'stock';
-        if (tab === 'fast-moving') return 'fast-moving';
-        if (tab === 'demand-forecast') return 'demand-forecast';
-        if (tab === 'forecast-reorder') return 'forecast-reorder';
-        if (tab === 'par') return 'par';
-        if (tab === 'purchase') return 'purchase';
-        if (tab === 'performance') return 'performance';
-        if (tab === 'customer') return 'customer';
-        if (tab === 'tax') return 'tax';
-        return null;
-    };
-
     const exportType = getExportType(resolvedTab, salesView);
     const canExport = exportType !== null;
+
+    const syncMoreMenuPlacement = useCallback(() => {
+        const el = moreButtonRef.current;
+        if (!el || !moreMenuOpen) return;
+        const r = el.getBoundingClientRect();
+        const margin = 16;
+        const maxPanelW = 18.5 * 16;
+        const width = Math.min(maxPanelW, window.innerWidth - margin * 2);
+        const right = Math.max(margin, window.innerWidth - r.right);
+        const spaceBelow = window.innerHeight - r.bottom - margin;
+        const spaceAbove = r.top - margin;
+        const targetMin = 260;
+        const placeAbove = spaceBelow < targetMin && spaceAbove > spaceBelow;
+        if (placeAbove) {
+            const maxHeight = Math.max(200, Math.min(spaceAbove - 8, window.innerHeight * 0.72));
+            setMoreMenuPlacement({
+                placeAbove: true,
+                bottom: window.innerHeight - r.top + 8,
+                right,
+                width,
+                maxHeight,
+            });
+        } else {
+            const top = r.bottom + 8;
+            const maxHeight = Math.max(200, window.innerHeight - top - margin);
+            setMoreMenuPlacement({ placeAbove: false, top, right, width, maxHeight });
+        }
+    }, [moreMenuOpen]);
+
+    const syncExportMenuPlacement = useCallback(() => {
+        const el = exportButtonRef.current;
+        if (!el || !exportMenuOpen || !canExport) return;
+        const r = el.getBoundingClientRect();
+        const margin = 16;
+        const width = Math.max(12 * 16, r.width, 192);
+        const right = Math.max(margin, window.innerWidth - r.right);
+        const spaceBelow = window.innerHeight - r.bottom - margin;
+        const spaceAbove = r.top - margin;
+        const targetMin = 140;
+        const placeAbove = spaceBelow < targetMin && spaceAbove > spaceBelow;
+        if (placeAbove) {
+            setExportMenuPlacement({
+                placeAbove: true,
+                bottom: window.innerHeight - r.top + 8,
+                right,
+                width,
+            });
+        } else {
+            setExportMenuPlacement({ placeAbove: false, top: r.bottom + 8, right, width });
+        }
+    }, [exportMenuOpen, canExport]);
+
+    useLayoutEffect(() => {
+        if (!moreMenuOpen) {
+            setMoreMenuPlacement(null);
+            return;
+        }
+        syncMoreMenuPlacement();
+    }, [moreMenuOpen, syncMoreMenuPlacement]);
+
+    useLayoutEffect(() => {
+        if (!exportMenuOpen || !canExport) {
+            setExportMenuPlacement(null);
+            return;
+        }
+        syncExportMenuPlacement();
+    }, [exportMenuOpen, canExport, syncExportMenuPlacement]);
+
+    useEffect(() => {
+        if (!moreMenuOpen && !exportMenuOpen) return;
+
+        const sync = () => {
+            if (moreMenuOpen) syncMoreMenuPlacement();
+            if (exportMenuOpen && canExport) syncExportMenuPlacement();
+        };
+
+        window.addEventListener('resize', sync);
+        const vv = window.visualViewport;
+        vv?.addEventListener('resize', sync);
+        const scrollEl = document.querySelector<HTMLElement>('.layout-content-panel');
+        scrollEl?.addEventListener('scroll', sync, { passive: true });
+
+        return () => {
+            window.removeEventListener('resize', sync);
+            vv?.removeEventListener('resize', sync);
+            scrollEl?.removeEventListener('scroll', sync);
+        };
+    }, [
+        moreMenuOpen,
+        exportMenuOpen,
+        canExport,
+        syncMoreMenuPlacement,
+        syncExportMenuPlacement,
+    ]);
+
+    useEffect(() => {
+        const onDocMouseDown = (event: MouseEvent) => {
+            const t = event.target as Node;
+            if (exportButtonRef.current?.contains(t)) return;
+            if (exportPanelRef.current?.contains(t)) return;
+            if (moreButtonRef.current?.contains(t)) return;
+            if (morePanelRef.current?.contains(t)) return;
+            setExportMenuOpen(false);
+            setMoreMenuOpen(false);
+        };
+        document.addEventListener('mousedown', onDocMouseDown);
+        return () => document.removeEventListener('mousedown', onDocMouseDown);
+    }, []);
+
+    useEffect(() => {
+        const onKey = (e: KeyboardEvent) => {
+            if (e.key === 'Escape') {
+                setExportMenuOpen(false);
+                setMoreMenuOpen(false);
+            }
+        };
+        document.addEventListener('keydown', onKey);
+        return () => document.removeEventListener('keydown', onKey);
+    }, []);
 
     const handleExport = async (format: 'excel' | 'pdf') => {
         if (!exportType) {
@@ -187,19 +327,11 @@ export function ReportsPage({ defaultTab = 'sales' }: ReportsPageProps) {
             params.end_date = endDate;
         }
         if (exportType === 'fast-moving') params.days = 90;
-        if (exportType === 'demand-forecast') {
-            params.horizon_days = 30;
-            params.history_days = 180;
-        }
-        if (exportType === 'forecast-reorder') {
-            params.horizon_days = 30;
-        }
-        if (exportType === 'par') {
-            params.status = 'pending';
-        }
 
         try {
             await pharmacyService.downloadReport(exportType, format, params);
+            setExportMenuOpen(false);
+            setMoreMenuOpen(false);
         } catch (error) {
             console.error('Export failed:', error);
             toast.error('Failed to export report.');
@@ -221,119 +353,159 @@ export function ReportsPage({ defaultTab = 'sales' }: ReportsPageProps) {
             ]}
             requireFacility
         >
-            <div className="p-6 space-y-6 animate-in fade-in duration-500">
-                <div className="flex w-full flex-wrap items-center justify-between gap-3">
-                    <div className="flex min-w-0 flex-wrap items-center gap-3">
-                        <h1 className="flex shrink-0 flex-wrap items-baseline gap-x-2 gap-y-1 text-2xl font-black uppercase tracking-tight text-healthcare-dark dark:text-white">
-                            <span>Reports</span>
-                            <span className="text-slate-400 dark:text-slate-500">·</span>
-                            <span className="text-healthcare-primary dark:text-blue-300">
-                                {SUBTAB_LABELS[resolvedTab] || resolvedTab}
-                            </span>
-                        </h1>
-                    </div>
-                    <div className="ml-auto flex shrink-0 gap-2">
-                        <button
-                            onClick={() => handleExport('excel')}
-                            disabled={!canExport}
-                            className={cn(
-                                'flex items-center gap-2 px-4 py-2 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all shadow-md',
-                                canExport
-                                    ? 'bg-emerald-600 text-white hover:bg-emerald-700 shadow-emerald-500/20'
-                                    : 'bg-slate-200 text-slate-500 cursor-not-allowed shadow-slate-200/20',
-                            )}
-                        >
-                            <Download size={14} /> Excel
-                        </button>
-                        <button
-                            onClick={() => handleExport('pdf')}
-                            disabled={!canExport}
-                            className={cn(
-                                'flex items-center gap-2 px-4 py-2 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all shadow-md',
-                                canExport
-                                    ? 'bg-rose-600 text-white hover:bg-rose-700 shadow-rose-500/20'
-                                    : 'bg-slate-200 text-slate-500 cursor-not-allowed shadow-slate-200/20',
-                            )}
-                        >
-                            <Download size={14} /> PDF
-                        </button>
-                    </div>
-                </div>
-
-                {/* Date / day pickers (conditionally shown) */}
-                {['sales', 'tax', 'performance', 'purchase'].includes(resolvedTab) && (
-                    <div
-                        className={cn(
-                            'flex flex-col gap-3',
-                            resolvedTab === 'sales'
-                                ? 'lg:flex-row lg:items-center lg:justify-between'
-                                : 'lg:flex-row lg:items-center lg:justify-end',
-                        )}
-                    >
-                        {resolvedTab === 'sales' ? (
-                            <div className="inline-flex w-fit flex-wrap items-center gap-1 rounded-2xl bg-white p-1 dark:bg-slate-900">
-                                {(Object.entries(SALES_REPORT_VIEW_LABELS) as Array<
-                                    [SalesReportView, string]
-                                >).map(([value, label]) => (
+            <div className="max-w-7xl mx-auto px-4 sm:px-6 py-6 sm:py-8 space-y-6 animate-in fade-in duration-500">
+                <header className="rounded-2xl border border-slate-200/90 dark:border-slate-700/90 bg-white dark:bg-slate-900/70 shadow-sm overflow-visible">
+                    <div className="p-5 sm:p-6 border-b border-slate-100 dark:border-slate-800/90 bg-gradient-to-br from-slate-50/90 to-white dark:from-slate-900 dark:to-slate-900/80">
+                        <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+                            <div className="min-w-0">
+                                <h1 className="text-2xl sm:text-3xl font-black tracking-tight text-healthcare-dark dark:text-white">
+                                    Reports
+                                </h1>
+                            </div>
+                            <div className="flex flex-wrap items-center justify-end gap-2 sm:gap-3 w-full sm:w-auto shrink-0">
+                                <div className="relative">
                                     <button
-                                        key={value}
-                                        onClick={() => setSalesView(value)}
+                                        ref={moreButtonRef}
+                                        type="button"
+                                        aria-expanded={moreMenuOpen}
+                                        aria-haspopup="menu"
+                                        onClick={() => {
+                                            setExportMenuOpen(false);
+                                            setMoreMenuOpen((o) => !o);
+                                        }}
                                         className={cn(
-                                            'rounded-xl px-4 py-2 text-[11px] font-black uppercase tracking-widest transition-colors',
-                                            salesView === value
-                                                ? 'bg-healthcare-primary text-white shadow-sm'
-                                                : 'text-slate-500 hover:bg-slate-100 hover:text-healthcare-dark dark:text-slate-300 dark:hover:bg-slate-800 dark:hover:text-white',
+                                            'inline-flex items-center gap-2 min-h-[44px] pl-4 pr-3 rounded-xl text-sm font-bold transition-all border-2',
+                                            moreMenuOpen || moreMenuActiveLabel
+                                                ? 'border-healthcare-primary/50 bg-healthcare-primary/[0.08] dark:bg-healthcare-primary/15 text-healthcare-dark dark:text-white shadow-sm'
+                                                : 'border-slate-200/90 dark:border-slate-600 bg-white/90 dark:bg-slate-800/60 text-slate-700 dark:text-slate-100 hover:border-healthcare-primary/35 hover:bg-white dark:hover:bg-slate-800',
                                         )}
                                     >
-                                        {label}
+                                        <span className="flex flex-col items-start leading-none">
+                                            <span className="text-[10px] font-black uppercase tracking-widest text-slate-400 dark:text-slate-500">
+                                                More
+                                            </span>
+                                            <span className="mt-1 text-sm font-bold">
+                                                {moreMenuActiveLabel
+                                                    ? moreMenuActiveLabel
+                                                    : 'Other reports'}
+                                            </span>
+                                        </span>
+                                        <ChevronDown
+                                            size={18}
+                                            className={cn(
+                                                'shrink-0 opacity-70 transition-transform duration-200',
+                                                moreMenuOpen && 'rotate-180',
+                                            )}
+                                        />
                                     </button>
-                                ))}
+                                </div>
+
+                                <div className="relative">
+                                    <button
+                                        ref={exportButtonRef}
+                                        type="button"
+                                        aria-expanded={exportMenuOpen}
+                                        aria-haspopup="menu"
+                                        onClick={() => {
+                                            setMoreMenuOpen(false);
+                                            if (canExport) setExportMenuOpen((o) => !o);
+                                        }}
+                                        disabled={!canExport}
+                                        className={cn(
+                                            'inline-flex items-center gap-2 min-h-[44px] px-5 rounded-xl text-sm font-bold transition-all',
+                                            canExport
+                                                ? 'bg-emerald-600 text-white hover:bg-emerald-700 shadow-md shadow-emerald-600/25'
+                                                : 'bg-slate-200 text-slate-500 cursor-not-allowed',
+                                        )}
+                                    >
+                                        <Download size={18} strokeWidth={2.25} />
+                                        Export
+                                        <ChevronDown
+                                            size={16}
+                                            className={cn(
+                                                'opacity-90 transition-transform duration-200',
+                                                exportMenuOpen && 'rotate-180',
+                                            )}
+                                        />
+                                    </button>
+                                </div>
                             </div>
-                        ) : null}
-
-                        <div className="flex items-center gap-2 bg-white dark:bg-slate-900 rounded-lg px-3 py-1.5 w-fit lg:ml-auto">
-                            <Calendar size={14} className="text-slate-400" />
-                            <input
-                                type="date"
-                                value={startDate}
-                                onChange={(e) => setStartDate(e.target.value)}
-                                className="bg-transparent text-sm font-bold text-slate-600 dark:text-slate-300 outline-none"
-                            />
-                            <span className="text-slate-300 px-1">—</span>
-                            <input
-                                type="date"
-                                value={endDate}
-                                onChange={(e) => setEndDate(e.target.value)}
-                                className="bg-transparent text-sm font-bold text-slate-600 dark:text-slate-300 outline-none"
-                            />
                         </div>
                     </div>
-                )}
+                </header>
 
-                {resolvedTab === 'stock' && (
-                    <div className="flex flex-wrap items-center justify-between gap-3">
-                        <div className="inline-flex w-fit flex-wrap items-center gap-1 rounded-2xl bg-transparent p-0">
-                            {(Object.entries(STOCK_REPORT_VIEW_LABELS) as Array<
-                                [StockReportView, string]
-                            >).map(([value, label]) => (
-                                <button
-                                    key={value}
-                                    onClick={() => setStockView(value)}
-                                    className={cn(
-                                        'rounded-xl px-4 py-2 text-[11px] font-black uppercase tracking-widest transition-colors',
-                                        stockView === value
-                                            ? 'bg-healthcare-primary text-white shadow-sm'
-                                            : 'text-slate-500 hover:bg-slate-100 hover:text-healthcare-dark dark:text-slate-300 dark:hover:bg-slate-800 dark:hover:text-white',
-                                    )}
+                {['sales', 'tax', 'performance', 'purchase'].includes(resolvedTab) && (
+                    <div className="rounded-2xl border border-slate-200/90 dark:border-slate-700/90 bg-white dark:bg-slate-900/50 px-4 py-4 sm:px-5 sm:py-4 shadow-sm">
+                        <div className="flex flex-wrap items-center gap-2 mb-3">
+                            <SlidersHorizontal
+                                size={16}
+                                className="text-slate-400 shrink-0"
+                                aria-hidden
+                            />
+                            <span className="text-[10px] font-black uppercase tracking-widest text-slate-400 dark:text-slate-500">
+                                Filters
+                            </span>
+                        </div>
+                        <div
+                            className={cn(
+                                'flex flex-col gap-4',
+                                resolvedTab === 'sales'
+                                    ? 'lg:flex-row lg:items-center lg:justify-between'
+                                    : 'lg:flex-row lg:items-center lg:justify-end',
+                            )}
+                        >
+                            {resolvedTab === 'sales' ? (
+                                <div
+                                    className="inline-flex w-full sm:w-auto flex-wrap items-center gap-1 rounded-xl p-1 bg-slate-100 dark:bg-slate-800 border border-slate-200/80 dark:border-slate-700/80"
+                                    role="group"
+                                    aria-label="Sales report type"
                                 >
-                                    {label}
-                                </button>
-                            ))}
+                                    {(Object.entries(SALES_REPORT_VIEW_LABELS) as Array<
+                                        [SalesReportView, string]
+                                    >).map(([value, label]) => (
+                                        <button
+                                            key={value}
+                                            type="button"
+                                            onClick={() => setSalesView(value)}
+                                            className={cn(
+                                                'min-h-[40px] rounded-lg px-3 sm:px-4 py-2 text-[11px] sm:text-xs font-bold uppercase tracking-wide transition-all',
+                                                salesView === value
+                                                    ? 'bg-white dark:bg-slate-900 text-healthcare-primary shadow-sm ring-1 ring-slate-200/80 dark:ring-slate-600'
+                                                    : 'text-slate-600 dark:text-slate-400 hover:text-healthcare-primary',
+                                            )}
+                                        >
+                                            {label}
+                                        </button>
+                                    ))}
+                                </div>
+                            ) : null}
+
+                            <div className="flex flex-wrap items-center gap-2 w-full lg:w-auto">
+                                <span className="text-xs font-semibold text-slate-500 dark:text-slate-400 sr-only sm:not-sr-only sm:inline">
+                                    Range
+                                </span>
+                                <div className="flex flex-1 sm:flex-initial items-center gap-2 rounded-xl border border-slate-200 dark:border-slate-600 bg-slate-50/80 dark:bg-slate-800/50 px-3 py-2 min-w-0">
+                                    <Calendar size={16} className="text-slate-400 shrink-0" />
+                                    <input
+                                        type="date"
+                                        value={startDate}
+                                        onChange={(e) => setStartDate(e.target.value)}
+                                        className="min-w-0 flex-1 bg-transparent text-sm font-bold text-slate-700 dark:text-slate-200 outline-none"
+                                    />
+                                    <span className="text-slate-300 dark:text-slate-600">—</span>
+                                    <input
+                                        type="date"
+                                        value={endDate}
+                                        onChange={(e) => setEndDate(e.target.value)}
+                                        className="min-w-0 flex-1 bg-transparent text-sm font-bold text-slate-700 dark:text-slate-200 outline-none"
+                                    />
+                                </div>
+                            </div>
                         </div>
                     </div>
                 )}
 
-                <div className="min-h-[400px] space-y-6 bg-transparent p-0">
+                <div className="min-h-[400px] space-y-6">
                     {resolvedTab === 'sales' && (
                         <SalesReports
                             facilityId={effectiveFacilityId}
@@ -343,19 +515,10 @@ export function ReportsPage({ defaultTab = 'sales' }: ReportsPageProps) {
                         />
                     )}
                     {resolvedTab === 'stock' && (
-                        <StockReports facilityId={effectiveFacilityId} view={stockView} />
+                        <StockReports facilityId={effectiveFacilityId} />
                     )}
                     {resolvedTab === 'fast-moving' && (
                         <FastSlowMovingReport facilityId={effectiveFacilityId} />
-                    )}
-                    {resolvedTab === 'demand-forecast' && (
-                        <DemandForecastReport facilityId={effectiveFacilityId} />
-                    )}
-                    {resolvedTab === 'forecast-reorder' && (
-                        <ForecastReorderReport facilityId={effectiveFacilityId} />
-                    )}
-                    {resolvedTab === 'par' && (
-                        <ParReplenishmentReport facilityId={effectiveFacilityId} />
                     )}
                     {resolvedTab === 'tax' && (
                         <TaxReports
@@ -382,6 +545,126 @@ export function ReportsPage({ defaultTab = 'sales' }: ReportsPageProps) {
                         />
                     )}
                 </div>
+
+                {moreMenuOpen &&
+                    moreMenuPlacement &&
+                    createPortal(
+                        <div
+                            ref={morePanelRef}
+                            style={{
+                                position: 'fixed',
+                                right: moreMenuPlacement.right,
+                                width: moreMenuPlacement.width,
+                                maxHeight: moreMenuPlacement.maxHeight,
+                                ...(moreMenuPlacement.placeAbove
+                                    ? { bottom: moreMenuPlacement.bottom, top: 'auto' }
+                                    : { top: moreMenuPlacement.top, bottom: 'auto' }),
+                            }}
+                            className={cn(
+                                'z-[300] flex flex-col rounded-2xl border border-slate-200/90 dark:border-slate-600',
+                                'bg-white dark:bg-slate-900 shadow-xl shadow-slate-300/25 dark:shadow-black/50',
+                                'overflow-hidden',
+                                moreMenuPlacement.placeAbove
+                                    ? 'origin-bottom-right animate-in fade-in zoom-in-95 slide-in-from-bottom-2 duration-200'
+                                    : 'origin-top-right animate-in fade-in zoom-in-95 slide-in-from-top-2 duration-200',
+                            )}
+                            role="menu"
+                        >
+                            <div className="shrink-0 px-3 pt-3 pb-1.5 border-b border-slate-100 dark:border-slate-800">
+                                <p className="text-[10px] font-black uppercase tracking-widest text-slate-400 dark:text-slate-500">
+                                    Open report
+                                </p>
+                                <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5 font-medium">
+                                    Tax, team, customers, or replenishment
+                                </p>
+                            </div>
+                            <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain p-2">
+                                {SECONDARY_REPORT_ACTIONS.map((item) => {
+                                    const Icon = item.icon;
+                                    const isActive =
+                                        item.tab !== '_replenish' && resolvedTab === item.tab;
+                                    return (
+                                        <Link
+                                            key={item.tab}
+                                            to={item.to as any}
+                                            search={{} as any}
+                                            role="menuitem"
+                                            onClick={() => setMoreMenuOpen(false)}
+                                            className={cn(
+                                                'flex items-center gap-3 rounded-xl px-3 py-2.5 transition-colors outline-none focus-visible:ring-2 focus-visible:ring-healthcare-primary/40',
+                                                isActive
+                                                    ? 'bg-healthcare-primary/12 dark:bg-healthcare-primary/20 text-healthcare-primary'
+                                                    : 'text-slate-800 dark:text-slate-100 hover:bg-slate-50 dark:hover:bg-slate-800/90',
+                                            )}
+                                        >
+                                            <span
+                                                className={cn(
+                                                    'flex h-10 w-10 shrink-0 items-center justify-center rounded-lg',
+                                                    isActive
+                                                        ? 'bg-healthcare-primary text-white'
+                                                        : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300',
+                                                )}
+                                            >
+                                                <Icon size={18} strokeWidth={2} />
+                                            </span>
+                                            <span className="min-w-0 text-left">
+                                                <span className="block text-sm font-bold leading-tight">
+                                                    {item.label}
+                                                </span>
+                                                <span className="mt-0.5 block text-[11px] font-medium text-slate-500 dark:text-slate-400 leading-snug">
+                                                    {item.hint}
+                                                </span>
+                                            </span>
+                                        </Link>
+                                    );
+                                })}
+                            </div>
+                        </div>,
+                        document.body,
+                    )}
+
+                {exportMenuOpen &&
+                    exportMenuPlacement &&
+                    canExport &&
+                    createPortal(
+                        <div
+                            ref={exportPanelRef}
+                            style={{
+                                position: 'fixed',
+                                right: exportMenuPlacement.right,
+                                width: exportMenuPlacement.width,
+                                ...(exportMenuPlacement.placeAbove
+                                    ? { bottom: exportMenuPlacement.bottom, top: 'auto' }
+                                    : { top: exportMenuPlacement.top, bottom: 'auto' }),
+                            }}
+                            className={cn(
+                                'z-[300] rounded-xl border border-slate-200 dark:border-slate-600',
+                                'bg-white dark:bg-slate-900 shadow-xl overflow-hidden py-1',
+                                exportMenuPlacement.placeAbove
+                                    ? 'origin-bottom-right animate-in fade-in zoom-in-95 slide-in-from-bottom-2 duration-200'
+                                    : 'origin-top-right animate-in fade-in zoom-in-95 slide-in-from-top-2 duration-200',
+                            )}
+                            role="menu"
+                        >
+                            <button
+                                type="button"
+                                role="menuitem"
+                                className="w-full text-left px-4 py-3 text-sm font-semibold text-slate-800 dark:text-slate-100 hover:bg-slate-50 dark:hover:bg-slate-800"
+                                onClick={() => handleExport('excel')}
+                            >
+                                Download Excel
+                            </button>
+                            <button
+                                type="button"
+                                role="menuitem"
+                                className="w-full text-left px-4 py-3 text-sm font-semibold text-slate-800 dark:text-slate-100 hover:bg-slate-50 dark:hover:bg-slate-800 border-t border-slate-100 dark:border-slate-800"
+                                onClick={() => handleExport('pdf')}
+                            >
+                                Download PDF
+                            </button>
+                        </div>,
+                        document.body,
+                    )}
             </div>
         </ProtectedRoute>
     );
@@ -1137,13 +1420,7 @@ function SalesReports({
     );
 }
 
-function StockReports({
-    facilityId,
-    view,
-}: {
-    facilityId?: number;
-    view: StockReportView;
-}) {
+function StockReports({ facilityId }: { facilityId?: number }) {
     type InventoryStatus = 'in_stock' | 'low_stock' | 'expiring_soon' | 'expired' | 'out_of_stock';
     type StockSummary = {
         total_medicines: number;
@@ -1449,7 +1726,6 @@ function StockReports({
 
     return (
         <div className="space-y-6">
-            {view === 'general' ? (
                 <>
                     <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-5">
                         <SummaryCard
@@ -1711,70 +1987,6 @@ function StockReports({
                         </div>
                     </div>
                 </>
-            ) : (
-                <>
-                    <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-5">
-                        <SummaryCard
-                            title="Total Valuation"
-                            value={`RWF ${Number(stockSummary?.total_value || 0).toLocaleString()}`}
-                            trend="Inventory value"
-                            icon={<DollarSign size={16} />}
-                        />
-                        <SummaryCard
-                            title="Low Stock"
-                            value={`${Number(stockSummary?.low_stock_count || statusCounts.low_stock)}`}
-                            trend="Reorder candidates"
-                            icon={<AlertTriangle size={16} />}
-                            color="amber"
-                        />
-                        <SummaryCard
-                            title="Expiring Soon"
-                            value={`${statusCounts.expiring_soon}`}
-                            trend={`${expiryWindowDays}d window`}
-                            icon={<AlertTriangle size={16} />}
-                            color="rose"
-                        />
-                        <SummaryCard
-                            title="Expired"
-                            value={`${statusCounts.expired}`}
-                            trend="Requires action"
-                            icon={<AlertTriangle size={16} />}
-                            color="rose"
-                        />
-                        <SummaryCard
-                            title="Out of Stock"
-                            value={`${statusCounts.out_of_stock}`}
-                            trend="Immediate action"
-                            icon={<Package size={16} />}
-                            color="rose"
-                        />
-                    </div>
-
-                    <div className="space-y-3">
-                        <div>
-                            <h3 className="text-sm font-black uppercase tracking-wide text-slate-700 dark:text-slate-200">
-                                Stock Analysis
-                            </h3>
-                            <p className="text-xs font-medium text-slate-500 dark:text-slate-400">
-                                ABC classification and replenishment signals for inventory planning.
-                            </p>
-                        </div>
-                        <ABCAnalysisReport />
-                    </div>
-
-                    <div className="space-y-3">
-                        <div>
-                            <h3 className="text-sm font-black uppercase tracking-wide text-slate-700 dark:text-slate-200">
-                                Reorder Priorities
-                            </h3>
-                            <p className="text-xs font-medium text-slate-500 dark:text-slate-400">
-                                Low-stock actions now live inside stock analytics instead of a separate report page.
-                            </p>
-                        </div>
-                        <ReorderSuggestions />
-                    </div>
-                </>
-            )}
         </div>
     );
 }

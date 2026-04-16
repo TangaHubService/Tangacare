@@ -45,8 +45,11 @@ html {
     --form-border-color: #4b5563;
     --layout-shell-bg: #f8fafc;
     --layout-shell-accent: rgba(37, 99, 235, 0.08);
-    --layout-sidebar-bg: #e8f1ff;
-    --layout-sidebar-border: #c6dcff;
+    /* Soft teal-tinted panel: calmer than pure blue, pairs with healthcare accent */
+    --layout-sidebar-top: #f3faf7;
+    --layout-sidebar-bg: #e8f2ef;
+    --layout-sidebar-bg-mid: #dceae4;
+    --layout-sidebar-border: #b8d4c8;
     --layout-header-bg: #2563eb;
     --layout-header-border: #1d4ed8;
     --layout-content-bg: #f8fafc;
@@ -75,8 +78,10 @@ html {
     --form-border-color: #4b5563;
     --layout-shell-bg: #020617;
     --layout-shell-accent: rgba(37, 99, 235, 0.08);
-    --layout-sidebar-bg: #10233a;
-    --layout-sidebar-border: #2a4566;
+    --layout-sidebar-top: #132433;
+    --layout-sidebar-bg: #0c1620;
+    --layout-sidebar-bg-mid: #080f18;
+    --layout-sidebar-border: #1e3a4a;
     --layout-header-bg: #0f2035;
     --layout-header-border: #1f3148;
     --layout-content-bg: #0b1220;
@@ -146,6 +151,12 @@ html {
 
     .layout-sidebar {
         background-color: var(--layout-sidebar-bg);
+        background-image: linear-gradient(
+            180deg,
+            var(--layout-sidebar-top) 0%,
+            var(--layout-sidebar-bg) 38%,
+            var(--layout-sidebar-bg-mid) 100%
+        );
         border-color: var(--layout-sidebar-border);
     }
 

@@ -5,9 +5,9 @@ import {
     ArrowRight,
     Bell,
     Check,
+    ChevronDown,
     Clock,
     Database,
-    LifeBuoy,
     Package,
     Scale,
     Search,
@@ -116,13 +116,6 @@ function deriveInitialScope(type: string | undefined): AlertScope {
 function deriveInitialSeverity(type: string | undefined): SeverityFilter {
     if (type === 'low_stock') return 'critical';
     return 'all';
-}
-
-function getScopeIcon(scope: AlertScope) {
-    if (scope === 'expiry') return AlertTriangle;
-    if (scope === 'operations') return LifeBuoy;
-    if (scope === 'inventory') return Database;
-    return Bell;
 }
 
 function getScopeLabel(scope: AlertScope) {
@@ -435,6 +428,14 @@ export function AlertsPage() {
                 const severityDiff = getAlertSortWeight(a) - getAlertSortWeight(b);
                 if (severityDiff !== 0) return severityDiff;
                 return new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
+            })
+            .filter((alert, index, arr) => {
+                const key = `${alert.type}|${alert.medicine_id ?? ''}|${alert.batch_id ?? ''}|${(alert.title || '').trim()}`;
+                const firstIdx = arr.findIndex(
+                    (x) =>
+                        `${x.type}|${x.medicine_id ?? ''}|${x.batch_id ?? ''}|${(x.title || '').trim()}` === key,
+                );
+                return firstIdx === index;
             });
     }, [alerts, scopeFilter, searchQuery, severityFilter]);
 
@@ -463,35 +464,40 @@ export function AlertsPage() {
         }));
     }, [scopeFilter, visibleAlerts]);
 
+    useEffect(() => {
+        const allowed = new Set(
+            ALERT_TYPE_OPTIONS[scopeFilter]
+                .map((o) => o.value)
+                .filter((v): v is BackendAlertType => Boolean(v)),
+        );
+        if (requestedType && !allowed.has(requestedType)) {
+            setRequestedType(undefined);
+        }
+    }, [scopeFilter, requestedType]);
+
     const sections = useMemo(() => {
         return [
             {
                 key: 'immediate',
-                title: statusFilter === 'resolved' ? 'Resolved Critical Items' : 'Immediate Action',
+                title: statusFilter === 'resolved' ? 'Resolved — Critical' : 'Critical',
                 description:
                     statusFilter === 'resolved'
-                        ? 'Critical issues that were already closed and should remain traceable.'
-                        : 'Out-of-stock and critical items that need the fastest response.',
+                        ? 'Previously critical items.'
+                        : 'Out of stock and critical severity.',
                 alerts: visibleAlerts.filter(
                     (alert) => alert.severity === 'out_of_stock' || alert.severity === 'critical',
                 ),
             },
             {
                 key: 'attention',
-                title: statusFilter === 'resolved' ? 'Resolved Warnings' : 'Needs Attention',
-                description:
-                    statusFilter === 'resolved'
-                        ? 'Warning-level items that were resolved and remain in history.'
-                        : 'Warnings and monitored items that still need planned follow-up.',
+                title: statusFilter === 'resolved' ? 'Resolved — Warning' : 'Warning',
+                description: statusFilter === 'resolved' ? 'Previously warning-level.' : 'Plan follow-up.',
                 alerts: visibleAlerts.filter((alert) => alert.severity === 'warning'),
             },
             {
                 key: 'monitor',
-                title: statusFilter === 'resolved' ? 'Resolved Informational Alerts' : 'Monitor',
-                description:
-                    statusFilter === 'resolved'
-                        ? 'Informational alerts already handled and kept for audit trail.'
-                        : 'Lower-severity alerts that should stay visible without crowding urgent work.',
+                title: statusFilter === 'resolved' ? 'Resolved — Info' : 'Info',
+                description: statusFilter === 'resolved' ? 'Previously informational.' : 'Lower priority.',
                 alerts: visibleAlerts.filter((alert) => alert.severity === 'info'),
             },
         ].filter((section) => section.alerts.length > 0);
@@ -517,197 +523,132 @@ export function AlertsPage() {
             ]}
             requireFacility
         >
-            <div className="p-5 space-y-6 animate-in fade-in slide-in-from-bottom-2 duration-700">
-                <div className="flex flex-col xl:flex-row xl:items-start xl:justify-between gap-4">
-                    <div className="space-y-2">
-                        <h2 className="text-2xl font-black text-healthcare-dark tracking-tight flex items-center gap-3">
-                            <Bell className="text-rose-500" />
-                            Alert Center
-                        </h2>
-                        <p className="text-slate-500 font-medium max-w-3xl text-sm">
-                            Triage inventory risk, expiry pressure, and operational exceptions from one queue. Each alert now shows its severity, context, and the best next workspace to open.
-                        </p>
-                    </div>
-
-                    <div className="bg-slate-100 dark:bg-slate-800 p-1 rounded-xl flex flex-wrap">
-                        {(['active', 'acknowledged', 'resolved'] as AlertStatusFilter[]).map((status) => (
-                            <button
-                                key={status}
-                                onClick={() => setStatusFilter(status)}
-                                className={cn(
-                                    'px-4 py-2 rounded-lg text-xs font-black uppercase tracking-wider transition-all',
-                                    statusFilter === status
-                                        ? 'bg-white dark:bg-slate-700 text-healthcare-primary shadow-sm'
-                                        : 'text-slate-500 hover:text-slate-700',
-                                )}
-                            >
-                                {status === 'resolved' ? 'History' : status}
-                            </button>
-                        ))}
-                    </div>
+            <div className="p-4 md:p-5 space-y-4 animate-in fade-in slide-in-from-bottom-2 duration-700">
+                <div className="space-y-1">
+                    <h2 className="text-xl font-black text-healthcare-dark dark:text-white tracking-tight flex items-center gap-2">
+                        <Bell className="text-rose-500 shrink-0" size={22} />
+                        Alerts
+                    </h2>
+                    <p className="text-slate-500 text-sm">
+                        Low stock, expiry, and operational items for this facility.
+                    </p>
                 </div>
 
-                <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-5 gap-4">
-                    <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm dark:bg-slate-900 dark:border-slate-800">
-                        <p className="text-[11px] font-black uppercase tracking-widest text-slate-400">In View</p>
-                        <p className="mt-2 text-2xl font-black text-slate-900 dark:text-white">{summary.total}</p>
-                        <p className="mt-1 text-xs text-slate-500">Alerts matching the current queue filters.</p>
-                    </div>
-                    <div className="rounded-2xl border border-rose-100 bg-rose-50/70 p-4 dark:bg-rose-950/20 dark:border-rose-900/30">
-                        <p className="text-[11px] font-black uppercase tracking-widest text-rose-500">Critical</p>
-                        <p className="mt-2 text-2xl font-black text-rose-700 dark:text-rose-300">{summary.critical}</p>
-                        <p className="mt-1 text-xs text-rose-600/80 dark:text-rose-300/80">Out-of-stock and critical risk items.</p>
-                    </div>
-                    <div className="rounded-2xl border border-amber-100 bg-amber-50/70 p-4 dark:bg-amber-950/20 dark:border-amber-900/30">
-                        <p className="text-[11px] font-black uppercase tracking-widest text-amber-600">Expiry</p>
-                        <p className="mt-2 text-2xl font-black text-amber-700 dark:text-amber-300">{summary.expiry}</p>
-                        <p className="mt-1 text-xs text-amber-700/80 dark:text-amber-300/80">Near-expiry and expired stock alerts.</p>
-                    </div>
-                    <div className="rounded-2xl border border-sky-100 bg-sky-50/70 p-4 dark:bg-sky-950/20 dark:border-sky-900/30">
-                        <p className="text-[11px] font-black uppercase tracking-widest text-sky-600">Operations</p>
-                        <p className="mt-2 text-2xl font-black text-sky-700 dark:text-sky-300">{summary.operations}</p>
-                        <p className="mt-1 text-xs text-sky-700/80 dark:text-sky-300/80">Recalls, variances, reorder, and cold-chain alerts.</p>
-                    </div>
-                    <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm dark:bg-slate-900 dark:border-slate-800">
-                        <p className="text-[11px] font-black uppercase tracking-widest text-slate-400">Acknowledged</p>
-                        <p className="mt-2 text-2xl font-black text-slate-900 dark:text-white">{summary.acknowledged}</p>
-                        <p className="mt-1 text-xs text-slate-500">Items already owned by someone but not yet closed.</p>
-                    </div>
+                <div className="rounded-xl border border-slate-200 bg-white px-4 py-3 dark:bg-slate-900 dark:border-slate-800 flex flex-wrap items-center gap-x-6 gap-y-2 text-sm">
+                    <span className="text-slate-600 dark:text-slate-300">
+                        <span className="font-black text-slate-900 dark:text-white tabular-nums">{summary.total}</span>{' '}
+                        in view
+                    </span>
+                    <span className="text-rose-600 dark:text-rose-300">
+                        <span className="font-black tabular-nums">{summary.critical}</span> critical
+                    </span>
+                    <span className="text-amber-700 dark:text-amber-300">
+                        <span className="font-black tabular-nums">{summary.expiry}</span> expiry
+                    </span>
+                    <span className="text-sky-700 dark:text-sky-300">
+                        <span className="font-black tabular-nums">{summary.operations}</span> ops
+                    </span>
+                    <span className="text-slate-500">
+                        <span className="font-black text-slate-700 dark:text-slate-200 tabular-nums">{summary.acknowledged}</span>{' '}
+                        ack
+                    </span>
                 </div>
 
-                <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm dark:bg-slate-900 dark:border-slate-800 space-y-4">
-                    <div className="flex flex-col xl:flex-row xl:items-center gap-4">
-                        <div className="flex flex-wrap gap-2">
-                            {(['all', 'inventory', 'expiry', 'operations'] as AlertScope[]).map((scope) => {
-                                const ScopeIcon = getScopeIcon(scope);
-                                return (
-                                    <button
-                                        key={scope}
-                                        onClick={() => {
-                                            setScopeFilter(scope);
-                                            if (requestedType) {
-                                                setRequestedType(undefined);
-                                            }
-                                        }}
-                                        className={cn(
-                                            'px-4 py-2 rounded-xl text-xs font-black uppercase tracking-wider transition-all border flex items-center gap-2',
-                                            scopeFilter === scope
-                                                ? 'bg-healthcare-primary text-white border-healthcare-primary shadow-md shadow-healthcare-primary/15'
-                                                : 'bg-white text-slate-600 border-slate-200 hover:border-healthcare-primary/30 dark:bg-slate-900 dark:border-slate-800 dark:text-slate-300',
-                                        )}
-                                    >
-                                        <ScopeIcon size={14} />
-                                        {getScopeLabel(scope)}
-                                    </button>
-                                );
-                            })}
-                        </div>
+                <div className="rounded-xl border border-slate-200 bg-white p-3 md:p-4 shadow-sm dark:bg-slate-900 dark:border-slate-800">
+                    <div className="flex flex-wrap items-center gap-2">
+                        <label className="sr-only" htmlFor="alerts-status">
+                            Status
+                        </label>
+                        <select
+                            id="alerts-status"
+                            value={statusFilter}
+                            onChange={(e) => setStatusFilter(e.target.value as AlertStatusFilter)}
+                            className="h-9 min-w-[7.5rem] shrink-0 rounded-lg border border-slate-200 bg-white px-2 text-sm font-semibold text-slate-800 shadow-sm focus:outline-none focus:ring-2 focus:ring-healthcare-primary/35 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100"
+                        >
+                            <option value="active">Active</option>
+                            <option value="acknowledged">Acknowledged</option>
+                            <option value="resolved">History</option>
+                        </select>
 
-                        <div className="flex flex-wrap gap-2 xl:ml-auto">
-                            {(['all', 'critical', 'warning', 'info'] as SeverityFilter[]).map((severity) => (
-                                <button
-                                    key={severity}
-                                    onClick={() => setSeverityFilter(severity)}
-                                    className={cn(
-                                        'px-3 py-2 rounded-xl text-xs font-black uppercase tracking-wider transition-all border',
-                                        severityFilter === severity
-                                            ? getAlertSeverityTone(severity === 'critical' ? 'critical' : severity)
-                                            : 'bg-white text-slate-500 border-slate-200 dark:bg-slate-900 dark:border-slate-800 dark:text-slate-300',
-                                    )}
-                                >
-                                    {severity === 'all' ? 'All Severity' : severity}
-                                </button>
+                        <label className="sr-only" htmlFor="alerts-scope">
+                            Queue
+                        </label>
+                        <select
+                            id="alerts-scope"
+                            value={scopeFilter}
+                            onChange={(e) => {
+                                setScopeFilter(e.target.value as AlertScope);
+                                setRequestedType(undefined);
+                            }}
+                            className="h-9 min-w-[8.5rem] shrink-0 rounded-lg border border-slate-200 bg-white px-2 text-sm font-semibold text-slate-800 shadow-sm focus:outline-none focus:ring-2 focus:ring-healthcare-primary/35 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100"
+                        >
+                            <option value="all">All queues</option>
+                            <option value="inventory">{getScopeLabel('inventory')}</option>
+                            <option value="expiry">{getScopeLabel('expiry')}</option>
+                            <option value="operations">{getScopeLabel('operations')}</option>
+                        </select>
+
+                        <label className="sr-only" htmlFor="alerts-severity">
+                            Severity
+                        </label>
+                        <select
+                            id="alerts-severity"
+                            value={severityFilter}
+                            onChange={(e) => setSeverityFilter(e.target.value as SeverityFilter)}
+                            className="h-9 min-w-[8rem] shrink-0 rounded-lg border border-slate-200 bg-white px-2 text-sm font-semibold text-slate-800 shadow-sm focus:outline-none focus:ring-2 focus:ring-healthcare-primary/35 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100"
+                        >
+                            <option value="all">All severity</option>
+                            <option value="critical">Critical</option>
+                            <option value="warning">Warning</option>
+                            <option value="info">Info</option>
+                        </select>
+
+                        <label className="sr-only" htmlFor="alerts-type">
+                            Alert type
+                        </label>
+                        <select
+                            id="alerts-type"
+                            value={requestedType ?? ''}
+                            onChange={(e) => {
+                                const v = e.target.value;
+                                if (!v) {
+                                    setRequestedType(undefined);
+                                    return;
+                                }
+                                const t = v as BackendAlertType;
+                                setRequestedType(t);
+                                setScopeFilter(getAlertScope(t));
+                            }}
+                            className="h-9 min-w-[9.5rem] max-w-[11rem] sm:max-w-none shrink-0 rounded-lg border border-slate-200 bg-white px-2 text-sm font-semibold text-slate-800 shadow-sm focus:outline-none focus:ring-2 focus:ring-healthcare-primary/35 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100"
+                        >
+                            <option value="">All types</option>
+                            {availableTypeFilters.map((option) => (
+                                <option key={option.value || 'unknown'} value={option.value || ''}>
+                                    {option.label}
+                                    {typeof option.count === 'number' ? ` (${option.count})` : ''}
+                                </option>
                             ))}
-                        </div>
-                    </div>
+                        </select>
 
-                    <div className="flex flex-col lg:flex-row gap-3">
-                        <div className="relative flex-1">
-                            <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
+                        <div className="relative flex-1 min-w-[min(100%,12rem)] basis-[12rem] grow">
+                            <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" size={16} />
                             <input
-                                type="text"
-                                placeholder="Search by message, medicine, batch, or alert type..."
+                                type="search"
+                                placeholder="Search…"
                                 value={searchQuery}
                                 onChange={(e) => setSearchQuery(e.target.value)}
-                                className="w-full pl-11 pr-10 py-3 bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-800 rounded-xl focus:outline-none focus:border-healthcare-primary transition-all text-sm font-medium"
+                                className="w-full h-9 pl-9 pr-8 bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700 rounded-lg focus:outline-none focus:ring-2 focus:ring-healthcare-primary/35 focus:border-healthcare-primary/50 text-sm"
                             />
-                            {searchQuery && (
+                            {searchQuery ? (
                                 <button
+                                    type="button"
                                     onClick={() => setSearchQuery('')}
-                                    className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
+                                    className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 p-0.5"
+                                    aria-label="Clear search"
                                 >
                                     <X size={14} />
                                 </button>
-                            )}
-                        </div>
-
-                        <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-xs text-slate-600 dark:bg-slate-800/50 dark:border-slate-800 dark:text-slate-300 lg:min-w-[260px]">
-                            <span className="font-black uppercase tracking-wider text-slate-400">Queue Focus</span>
-                            <p className="mt-1 leading-relaxed">
-                                {scopeFilter === 'operations'
-                                    ? 'Operational alerts point to recall, variance, reorder, and exception workflows.'
-                                    : scopeFilter === 'expiry'
-                                        ? 'Expiry alerts route to the stock-side expiry workspace for action planning.'
-                                        : scopeFilter === 'inventory'
-                                            ? 'Inventory alerts focus on medicine stock context and replenishment decisions.'
-                                            : 'All alert domains are visible together in one triage queue.'}
-                            </p>
-                        </div>
-                    </div>
-
-                    <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4 dark:bg-slate-800/40 dark:border-slate-800">
-                        <div className="flex flex-col lg:flex-row lg:items-start lg:justify-between gap-3">
-                            <div>
-                                <p className="text-[11px] font-black uppercase tracking-widest text-slate-400">
-                                    Queue Lanes
-                                </p>
-                                <p className="mt-1 text-sm text-slate-500">
-                                    Narrow the queue to a specific operational lane when one team needs to focus on a single kind of alert.
-                                </p>
-                            </div>
-                            {requestedType && (
-                                <button
-                                    onClick={() => setRequestedType(undefined)}
-                                    className="px-3 py-2 rounded-xl bg-white text-slate-600 border border-slate-200 text-xs font-black uppercase tracking-wider hover:border-healthcare-primary/30 dark:bg-slate-900 dark:border-slate-700 dark:text-slate-300"
-                                >
-                                    Clear Type Focus
-                                </button>
-                            )}
-                        </div>
-
-                        <div className="mt-4 flex flex-wrap gap-2">
-                            <button
-                                onClick={() => setRequestedType(undefined)}
-                                className={cn(
-                                    'px-3 py-2 rounded-xl text-xs font-black uppercase tracking-wider transition-all border',
-                                    !requestedType
-                                        ? 'bg-healthcare-primary text-white border-healthcare-primary shadow-md shadow-healthcare-primary/15'
-                                        : 'bg-white text-slate-600 border-slate-200 hover:border-healthcare-primary/30 dark:bg-slate-900 dark:border-slate-800 dark:text-slate-300',
-                                )}
-                            >
-                                All {scopeFilter === 'all' ? 'Types' : getScopeLabel(scopeFilter)}
-                            </button>
-
-                            {availableTypeFilters.map((option) => (
-                                <button
-                                    key={option.value}
-                                    onClick={() => {
-                                        setRequestedType(option.value);
-                                        if (option.value) {
-                                            setScopeFilter(getAlertScope(option.value));
-                                        }
-                                    }}
-                                    className={cn(
-                                        'px-3 py-2 rounded-xl text-xs font-black uppercase tracking-wider transition-all border',
-                                        requestedType === option.value
-                                            ? 'bg-white text-healthcare-primary border-healthcare-primary shadow-sm dark:bg-slate-900'
-                                            : 'bg-white text-slate-600 border-slate-200 hover:border-healthcare-primary/30 dark:bg-slate-900 dark:border-slate-800 dark:text-slate-300',
-                                    )}
-                                    title={option.description}
-                                >
-                                    {option.label} <span className="text-[10px] opacity-70">({option.count})</span>
-                                </button>
-                            ))}
+                            ) : null}
                         </div>
                     </div>
                 </div>
@@ -721,22 +662,22 @@ export function AlertsPage() {
                         className="border-none shadow-none"
                     />
                 ) : sections.length > 0 ? (
-                    <div className="space-y-6">
+                    <div className="space-y-5">
                         {sections.map((section) => (
-                            <section key={section.key} className="space-y-3">
-                                <div className="flex flex-col md:flex-row md:items-end md:justify-between gap-2">
+                            <section key={section.key} className="space-y-2">
+                                <div className="flex flex-row items-baseline justify-between gap-2">
                                     <div>
-                                        <h3 className="text-sm font-black uppercase tracking-widest text-slate-500">
+                                        <h3 className="text-xs font-black uppercase tracking-widest text-slate-500">
                                             {section.title}
                                         </h3>
-                                        <p className="text-sm text-slate-500">{section.description}</p>
+                                        <p className="text-xs text-slate-500 mt-0.5">{section.description}</p>
                                     </div>
-                                    <p className="text-xs font-bold uppercase tracking-wider text-slate-400">
-                                        {section.alerts.length} item{section.alerts.length === 1 ? '' : 's'}
+                                    <p className="text-[11px] font-bold text-slate-400 tabular-nums shrink-0">
+                                        {section.alerts.length}
                                     </p>
                                 </div>
 
-                                <div className="grid grid-cols-1 gap-4">
+                                <div className="grid grid-cols-1 gap-3">
                                     {section.alerts.map((alert) => {
                                         const AlertIcon = getAlertIcon(alert);
                                         const actionTarget = getAlertActionTarget(alert);
@@ -750,7 +691,7 @@ export function AlertsPage() {
                                                     alertRefs.current[alert.id] = node;
                                                 }}
                                                 className={cn(
-                                                    'rounded-2xl border border-slate-200 bg-white p-5 shadow-sm transition-all hover:shadow-md dark:bg-slate-900 dark:border-slate-800 border-l-4',
+                                                    'rounded-xl border border-slate-200 bg-white p-4 shadow-sm transition-all hover:shadow-md dark:bg-slate-900 dark:border-slate-800 border-l-4',
                                                     getAlertAccentTone(alert.severity),
                                                     Number(searchParams.alertId) === alert.id &&
                                                         'ring-2 ring-healthcare-primary ring-offset-2 ring-offset-white dark:ring-offset-slate-900',
@@ -826,30 +767,36 @@ export function AlertsPage() {
                                                             </div>
                                                         </div>
 
-                                                        <div className="grid grid-cols-1 xl:grid-cols-[minmax(0,1fr)_auto] gap-4 items-start">
-                                                            <div className="rounded-2xl bg-slate-50 border border-slate-200 p-4 dark:bg-slate-800/40 dark:border-slate-800">
-                                                                <p className="text-[11px] font-black uppercase tracking-widest text-slate-400">Next Best Step</p>
-                                                                <p className="mt-2 text-sm text-slate-600 dark:text-slate-300 leading-relaxed">
-                                                                    {getNextStepText(alert)}
-                                                                </p>
-
-                                                                <div className="mt-3 flex flex-wrap gap-2 text-[11px]">
-                                                                    {alert.current_value !== undefined && alert.current_value !== null && (
-                                                                        <span className="px-2.5 py-1 rounded-full bg-white text-slate-600 border border-slate-200 dark:bg-slate-900 dark:text-slate-300 dark:border-slate-700">
-                                                                            Current: {alert.current_value}
+                                                        <div className="flex flex-col gap-2">
+                                                            <div className="flex flex-wrap gap-2 text-[11px]">
+                                                                {alert.current_value !== undefined && alert.current_value !== null && (
+                                                                    <span className="px-2 py-0.5 rounded-md bg-slate-100 text-slate-700 border border-slate-200 dark:bg-slate-800 dark:text-slate-200 dark:border-slate-700">
+                                                                        Current: {alert.current_value}
+                                                                    </span>
+                                                                )}
+                                                                {alert.threshold_value !== undefined &&
+                                                                    alert.threshold_value !== null &&
+                                                                    alert.threshold_value > 0 && (
+                                                                        <span className="px-2 py-0.5 rounded-md bg-slate-100 text-slate-700 border border-slate-200 dark:bg-slate-800 dark:text-slate-200 dark:border-slate-700">
+                                                                            Threshold: {alert.threshold_value}
                                                                         </span>
                                                                     )}
-                                                                    {alert.threshold_value !== undefined &&
-                                                                        alert.threshold_value !== null &&
-                                                                        alert.threshold_value > 0 && (
-                                                                            <span className="px-2.5 py-1 rounded-full bg-white text-slate-600 border border-slate-200 dark:bg-slate-900 dark:text-slate-300 dark:border-slate-700">
-                                                                                Threshold: {alert.threshold_value}
-                                                                            </span>
-                                                                        )}
-                                                                </div>
                                                             </div>
 
-                                                            <div className="flex flex-wrap xl:flex-col gap-2 xl:min-w-[220px]">
+                                                            <details className="rounded-lg border border-slate-200 bg-slate-50/80 dark:bg-slate-800/40 dark:border-slate-800 group/guidance">
+                                                                <summary className="px-3 py-2 cursor-pointer text-[11px] font-bold text-slate-600 dark:text-slate-300 list-none flex items-center justify-between [&::-webkit-details-marker]:hidden">
+                                                                    <span>Guidance</span>
+                                                                    <ChevronDown
+                                                                        size={14}
+                                                                        className="text-slate-400 transition-transform group-open/guidance:rotate-180"
+                                                                    />
+                                                                </summary>
+                                                                <p className="px-3 pb-3 text-sm text-slate-600 dark:text-slate-300 leading-relaxed border-t border-slate-200/80 dark:border-slate-700/80 pt-2">
+                                                                    {getNextStepText(alert)}
+                                                                </p>
+                                                            </details>
+
+                                                            <div className="flex flex-wrap gap-2">
                                                                 {actionTarget && (
                                                                     <button
                                                                         onClick={() => handleOpenAction(alert)}

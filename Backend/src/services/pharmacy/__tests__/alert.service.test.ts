@@ -90,6 +90,8 @@ describe('AlertService', () => {
         await service.checkLowStock(1, 1);
 
         expect(mockStockRepository.createQueryBuilder).toHaveBeenCalled();
+        const qb = mockStockRepository.createQueryBuilder.mock.results[0].value;
+        expect(qb.andWhere).toHaveBeenCalledWith('stock.is_deleted = :isDeleted', { isDeleted: false });
         expect(mockAlertRepository.create).toHaveBeenCalledWith(
             expect.objectContaining({
                 facility_id: 1,

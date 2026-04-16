@@ -609,10 +609,18 @@ export interface Sale {
     payments?: SalePayment[];
 }
 
+/** Response shape from POST /pharmacy/sales (client-normalized). */
+export interface CreateSaleResult {
+    sale: Sale;
+    warnings: string[];
+}
+
 export interface CreateSaleDto {
     patient_id?: number;
     prescription_id?: number;
     dispense_type?: 'otc' | 'prescription' | 'internal' | 'transfer';
+    /** When strict FEFO blocks the batch, users with inventory write may send a reason (audited server-side). */
+    fefo_override_reason?: string;
     vat_rate?: number;
     items: Array<{
         medicine_id: number;

@@ -1,8 +1,8 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { Outlet, Link, useNavigate, useLocation } from '@tanstack/react-router';
+import { Outlet, Link, useNavigate } from '@tanstack/react-router';
 import {
-    BarChart3,
+    LayoutDashboard,
     Package,
     Users,
     Settings,
@@ -13,7 +13,6 @@ import {
     Bell,
     Moon,
     Sun,
-    Zap,
     ShoppingCart,
     Factory,
     Database,
@@ -24,6 +23,18 @@ import {
     ShieldCheck,
     Receipt,
     RotateCcw,
+    Truck,
+    RefreshCw,
+    BarChart3,
+    Layers,
+    ArrowLeftRight,
+    ClipboardList,
+    AlertTriangle,
+    Scale,
+    TrendingUp,
+    BarChart2,
+    ShoppingBag,
+    ScrollText,
 } from 'lucide-react';
 import logo from '../../assets/tanga-logo.png';
 import { useAuth } from '../../context/AuthContext';
@@ -55,6 +66,8 @@ interface NavItem {
     allowedPermissions?: string[];
     children?: NavItem[];
     subsection?: string;
+    /** When true, expanded sidebar lists children directly under the section (parent row hidden). Collapsed sidebar still shows the parent icon. */
+    hideParentWhenExpanded?: boolean;
 }
 
 interface NavSection {
@@ -88,13 +101,65 @@ const GLOBAL_SEARCH_GROUPS: Array<{ key: GlobalSearchGroupKey; label: string }> 
 
 const NAV_SECTIONS: NavSection[] = [
     {
-        id: 'dashboard',
-        label: 'Dashboard',
+        id: 'operations',
+        label: 'Operations',
         items: [
             {
                 to: '/app',
-                icon: BarChart3,
-                label: 'Dashboard',
+                icon: LayoutDashboard,
+                label: 'Today',
+                allowedRoles: [
+                    'FACILITY_ADMIN',
+                    'FACILITY ADMIN',
+                    'OWNER',
+                    'CASHIER',
+                    'PHARMACIST',
+                    'STORE_MANAGER',
+                    'STORE MANAGER',
+                    'STORE_KEEPER',
+                    'STORE KEEPER',
+                    'AUDITOR',
+                    'ADMIN',
+                    'DOCTOR',
+                ],
+            },
+            {
+                to: '/app/sell',
+                icon: ShoppingCart,
+                label: 'Sell',
+                allowedRoles: [
+                    'FACILITY_ADMIN',
+                    'FACILITY ADMIN',
+                    'OWNER',
+                    'CASHIER',
+                    'PHARMACIST',
+                    'STORE_MANAGER',
+                    'STORE MANAGER',
+                    'AUDITOR',
+                    'ADMIN',
+                ],
+            },
+            {
+                to: '/app/patients',
+                icon: Users,
+                label: 'Customers',
+                allowedRoles: [
+                    'FACILITY_ADMIN',
+                    'FACILITY ADMIN',
+                    'OWNER',
+                    'CASHIER',
+                    'PHARMACIST',
+                    'STORE_MANAGER',
+                    'STORE MANAGER',
+                    'AUDITOR',
+                    'ADMIN',
+                ],
+                allowedPermissions: ['patients:read'],
+            },
+            {
+                to: '/app/insurance',
+                icon: ShieldCheck,
+                label: 'Insurance',
                 allowedRoles: [
                     'FACILITY_ADMIN',
                     'FACILITY ADMIN',
@@ -129,12 +194,12 @@ const NAV_SECTIONS: NavSection[] = [
     },
     {
         id: 'inventory',
-        label: 'Inventory',
+        label: 'Stock',
         items: [
             {
                 to: '/app/inventory',
                 icon: Package,
-                label: 'Inventory',
+                label: 'Stock',
                 allowedRoles: [
                     'FACILITY_ADMIN',
                     'FACILITY ADMIN',
@@ -142,6 +207,8 @@ const NAV_SECTIONS: NavSection[] = [
                     'CASHIER',
                     'STORE_MANAGER',
                     'STORE MANAGER',
+                    'STORE_KEEPER',
+                    'STORE KEEPER',
                     'PHARMACIST',
                     'AUDITOR',
                     'ADMIN',
@@ -149,74 +216,77 @@ const NAV_SECTIONS: NavSection[] = [
                 ],
                 children: [
                     { to: '/app/inventory', icon: Package, label: 'Medicines' },
-                    { to: '/app/stock', icon: Database, label: 'Batches' },
-                    { to: '/app/recalls', icon: Bell, label: 'Expiry monitoring & recalls' },
-                    { to: '/app/stocktaking', icon: Database, label: 'Stock Adjustments' },
-                    { to: '/app/stock-movements', icon: Database, label: 'Stock Movements' },
+                    { to: '/app/stock', icon: Layers, label: 'Batches' },
+                    {
+                        to: '/app/stock-movements',
+                        icon: ArrowLeftRight,
+                        label: 'Movements',
+                        allowedPermissions: ['stock_movements:read'],
+                    },
+                    {
+                        to: '/app/stocktaking',
+                        icon: ClipboardList,
+                        label: 'Stock count',
+                        allowedPermissions: ['inventory:write'],
+                    },
+                    { to: '/app/recalls', icon: AlertTriangle, label: 'Expiry & recalls' },
+                    {
+                        to: '/app/variances',
+                        icon: Scale,
+                        label: 'Variances',
+                        allowedRoles: [
+                            'FACILITY_ADMIN',
+                            'FACILITY ADMIN',
+                            'OWNER',
+                            'STORE_MANAGER',
+                            'STORE MANAGER',
+                            'ADMIN',
+                        ],
+                    },
                 ],
             },
         ],
     },
     {
-        id: 'procurement',
-        label: 'Procurement',
+        id: 'supply',
+        label: 'Order & replenish',
         items: [
             {
-                to: '/app/procurement/orders',
-                icon: ShoppingCart,
-                label: 'Procurement',
+                to: '/app/order-receive',
+                icon: Truck,
+                label: 'Order & receive',
                 allowedRoles: [
                     'FACILITY_ADMIN',
                     'FACILITY ADMIN',
                     'OWNER',
                     'STORE_MANAGER',
                     'STORE MANAGER',
+                    'STORE_KEEPER',
+                    'STORE KEEPER',
                     'AUDITOR',
                     'ADMIN',
                 ],
                 allowedPermissions: ['procurement:read'],
+                hideParentWhenExpanded: true,
                 children: [
+                    { to: '/app/procurement/orders', icon: ShoppingCart, label: 'Purchase orders' },
                     { to: '/app/procurement/suppliers', icon: Factory, label: 'Suppliers' },
-                    { to: '/app/procurement/orders', icon: ShoppingCart, label: 'Purchase Orders' },
                 ],
             },
-        ],
-    },
-    {
-        id: 'sales',
-        label: 'Sales / Dispensing',
-        items: [
             {
-                to: '/app/dispensing',
-                icon: Zap,
-                label: 'Sales & Dispensing',
+                to: '/app/replenish',
+                icon: RefreshCw,
+                label: 'Replenish',
                 allowedRoles: [
                     'FACILITY_ADMIN',
                     'FACILITY ADMIN',
                     'OWNER',
-                    'CASHIER',
-                    'PHARMACIST',
                     'STORE_MANAGER',
                     'STORE MANAGER',
-                    'AUDITOR',
+                    'PHARMACIST',
                     'ADMIN',
                 ],
-                children: [
-                    { to: '/app/dispensing', icon: Zap, label: 'Dispensing' },
-                    {
-                        to: '/app/analytics/returns',
-                        icon: RotateCcw,
-                        label: 'Returns',
-                        allowedPermissions: ['reports:read'],
-                    },
-                    {
-                        to: '/app/patients',
-                        icon: Users,
-                        label: 'Customers',
-                        allowedPermissions: ['patients:read'],
-                    },
-                    { to: '/app/insurance', icon: ShieldCheck, label: 'Insurance' },
-                ],
+                allowedPermissions: ['procurement:read'],
             },
         ],
     },
@@ -241,79 +311,38 @@ const NAV_SECTIONS: NavSection[] = [
                 children: [
                     {
                         to: '/app/analytics/sales',
-                        icon: FileText,
-                        label: 'Sales',
-                        subsection: 'Operations',
-                        allowedPermissions: ['reports:read'],
-                    },
-                    {
-                        to: '/app/analytics/inventory',
-                        icon: FileText,
-                        label: 'Stock',
-                        subsection: 'Operations',
-                        allowedPermissions: ['reports:read'],
-                    },
-                    {
-                        to: '/app/analytics/procurement',
-                        icon: FileText,
-                        label: 'Purchase',
-                        subsection: 'Operations',
+                        icon: TrendingUp,
+                        label: 'Sales summary',
                         allowedPermissions: ['reports:read'],
                     },
                     {
                         to: '/app/analytics/fast-moving',
-                        icon: FileText,
-                        label: 'Fast / Slow',
-                        subsection: 'Inventory Intelligence',
+                        icon: BarChart2,
+                        label: 'Top sellers',
                         allowedPermissions: ['reports:read'],
                     },
                     {
-                        to: '/app/analytics/demand-forecast',
-                        icon: FileText,
-                        label: 'Demand Forecast',
-                        subsection: 'Inventory Intelligence',
+                        to: '/app/analytics/inventory',
+                        icon: Package,
+                        label: 'Stock & expiry',
                         allowedPermissions: ['reports:read'],
                     },
                     {
-                        to: '/app/analytics/forecast-reorder',
-                        icon: FileText,
-                        label: 'Forecast Reorder',
-                        subsection: 'Inventory Intelligence',
+                        to: '/app/analytics/procurement',
+                        icon: ShoppingBag,
+                        label: 'Purchasing',
                         allowedPermissions: ['reports:read'],
                     },
                     {
-                        to: '/app/analytics/par',
-                        icon: FileText,
-                        label: 'PAR Replenishment',
-                        subsection: 'Inventory Intelligence',
-                        allowedPermissions: ['reports:read'],
-                    },
-                    {
-                        to: '/app/analytics/performance',
-                        icon: FileText,
-                        label: 'Performance',
-                        subsection: 'Business & Compliance',
-                        allowedPermissions: ['reports:read'],
-                    },
-                    {
-                        to: '/app/analytics/loyalty',
-                        icon: FileText,
-                        label: 'Customers',
-                        subsection: 'Business & Compliance',
-                        allowedPermissions: ['reports:read'],
-                    },
-                    {
-                        to: '/app/analytics/tax',
-                        icon: FileText,
-                        label: 'Tax',
-                        subsection: 'Business & Compliance',
+                        to: '/app/analytics/returns',
+                        icon: RotateCcw,
+                        label: 'Returns',
                         allowedPermissions: ['reports:read'],
                     },
                     {
                         to: '/app/audit-logs',
-                        icon: FileText,
-                        label: 'Audit Logs',
-                        subsection: 'Audit',
+                        icon: ScrollText,
+                        label: 'Audit logs',
                         allowedPermissions: ['audit:read'],
                     },
                 ],
@@ -321,9 +350,26 @@ const NAV_SECTIONS: NavSection[] = [
         ],
     },
     {
-        id: 'management',
-        label: 'Management',
+        id: 'settings',
+        label: 'Settings & admin',
         items: [
+            {
+                to: '/app/overview',
+                icon: BarChart3,
+                label: 'Management overview',
+                allowedRoles: [
+                    'OWNER',
+                    'ADMIN',
+                    'FACILITY_ADMIN',
+                    'FACILITY ADMIN',
+                    'STORE_MANAGER',
+                    'STORE MANAGER',
+                    'SUPER_ADMIN',
+                    'SUPER ADMIN',
+                    'Admin',
+                    'Super Admin',
+                ],
+            },
             {
                 to: '/app/organizations',
                 icon: Building2,
@@ -355,43 +401,43 @@ const NAV_SECTIONS: NavSection[] = [
             {
                 to: '/app/admin/dashboard',
                 icon: Receipt,
-                label: 'Admin Dashboard',
+                label: 'Admin dashboard',
                 allowedRoles: ['SUPER_ADMIN', 'SUPER ADMIN'],
             },
             {
                 to: '/app/admin/billing/customers',
                 icon: Users,
-                label: 'Billing Customers',
+                label: 'Billing customers',
                 allowedRoles: ['SUPER_ADMIN', 'SUPER ADMIN'],
             },
             {
                 to: '/app/admin/billing/subscriptions',
                 icon: FileText,
-                label: 'Billing Subscriptions',
+                label: 'Billing subscriptions',
                 allowedRoles: ['SUPER_ADMIN', 'SUPER ADMIN'],
             },
             {
                 to: '/app/admin/billing/payments',
                 icon: Receipt,
-                label: 'Billing Payments',
+                label: 'Billing payments',
                 allowedRoles: ['SUPER_ADMIN', 'SUPER ADMIN'],
             },
             {
                 to: '/app/admin/billing/trials',
                 icon: ShieldCheck,
-                label: 'Billing Trials',
+                label: 'Billing trials',
                 allowedRoles: ['SUPER_ADMIN', 'SUPER ADMIN'],
             },
             {
                 to: '/app/admin/billing/plans',
                 icon: Settings,
-                label: 'Billing Plans',
+                label: 'Billing plans',
                 allowedRoles: ['SUPER_ADMIN', 'SUPER ADMIN'],
             },
             {
                 to: '/app/admin/billing/gateways',
                 icon: Database,
-                label: 'Billing Gateways',
+                label: 'Billing gateways',
                 allowedRoles: ['SUPER_ADMIN', 'SUPER ADMIN'],
             },
             {
@@ -410,7 +456,11 @@ interface SidebarLinkProps {
     label: string;
     isCollapsed: boolean;
     children?: NavItem[];
-    currentPath: string;
+    /**
+     * When true, expanded sidebar hides the parent row and lists children flush under the section
+     * (duplicate section title, or `hideParentWhenExpanded` on the nav item). Collapsed sidebar keeps the parent icon.
+     */
+    flattenExpandedChildren?: boolean;
     onNavigate?: () => void;
 }
 
@@ -420,51 +470,36 @@ const SidebarLink: React.FC<SidebarLinkProps> = ({
     label,
     isCollapsed,
     children,
-    currentPath,
+    flattenExpandedChildren = false,
     onNavigate,
 }) => {
     const hasChildren = children && children.length > 0;
-    const shouldBeOpen =
-        !!hasChildren &&
-        (currentPath === to ||
-            currentPath.startsWith(`${to}/`) ||
-            children.some((child) => currentPath.startsWith(child.to)));
-    const [isOpen, setIsOpen] = useState(shouldBeOpen);
+    const hideParentWhileExpanded =
+        flattenExpandedChildren && hasChildren && !isCollapsed;
+    const showParentRow = !hideParentWhileExpanded;
+    const flushChildList = flattenExpandedChildren && !isCollapsed;
 
-    React.useEffect(() => {
-        if (!isCollapsed) {
-            setIsOpen(shouldBeOpen);
-        }
-    }, [isCollapsed, shouldBeOpen]);
-
-    const handleClick = (e: React.MouseEvent) => {
-        if (hasChildren) {
-            e.preventDefault();
-            setIsOpen(!isOpen);
-        } else {
-            onNavigate?.();
-        }
-    };
+    const childLinkClass = cn(
+        'flex items-center gap-3 rounded-lg transition-colors whitespace-nowrap group/child',
+        flushChildList
+            ? 'px-4 py-2.5 text-sm font-bold text-slate-600 hover:text-healthcare-primary hover:bg-blue-50 dark:hover:bg-slate-800'
+            : 'px-3 py-2 text-sm text-slate-600 hover:text-healthcare-primary hover:bg-blue-50 dark:hover:bg-slate-800',
+    );
 
     return (
         <div>
-            <Link
-                to={to as any}
-                search={{} as any}
-                onClick={handleClick}
-                activeProps={{
-                    className:
-                        'bg-healthcare-primary/10 text-healthcare-primary dark:bg-healthcare-primary dark:text-white shadow-none',
-                }}
-                className={cn(
-                    'flex items-center px-4 py-2.5 text-slate-600 hover:bg-blue-50 hover:text-healthcare-primary rounded-lg transition-all group justify-between',
-                    isCollapsed ? 'justify-center px-0 mx-auto w-10' : 'gap-3',
-                )}
-            >
-                <div
+            {showParentRow && (
+                <Link
+                    to={to as any}
+                    search={{} as any}
+                    onClick={() => onNavigate?.()}
+                    activeProps={{
+                        className:
+                            'bg-healthcare-primary/10 text-healthcare-primary dark:bg-healthcare-primary dark:text-white shadow-none',
+                    }}
                     className={cn(
-                        'flex items-center gap-3',
-                        isCollapsed && 'justify-center w-full',
+                        'flex items-center px-4 py-2.5 text-slate-600 hover:bg-blue-50 hover:text-healthcare-primary rounded-lg transition-all group',
+                        isCollapsed ? 'justify-center px-0 mx-auto w-10' : 'gap-3',
                     )}
                 >
                     <span className="group-hover:scale-105 transition-transform flex-shrink-0">
@@ -473,17 +508,19 @@ const SidebarLink: React.FC<SidebarLinkProps> = ({
                     {!isCollapsed && (
                         <span className="font-bold text-sm whitespace-nowrap">{label}</span>
                     )}
-                </div>
-                {!isCollapsed && hasChildren && (
-                    <ChevronDown
-                        size={14}
-                        className={cn('transition-transform', isOpen ? 'rotate-180' : '')}
-                    />
-                )}
-            </Link>
-            {!isCollapsed && isOpen && hasChildren && (
-                <div className="ml-9 mt-1 space-y-1 border-l-2 border-blue-100 pl-2">
+                </Link>
+            )}
+            {!isCollapsed && hasChildren && (
+                <div
+                    className={cn(
+                        'mt-1 space-y-1',
+                        flushChildList
+                            ? 'ml-0 pl-0'
+                            : 'ml-9 border-l-2 border-blue-100 dark:border-slate-700 pl-2',
+                    )}
+                >
                     {children.map((child, index) => {
+                        const ChildIcon = child.icon;
                         const prevSub = index > 0 ? children[index - 1]?.subsection : undefined;
                         const showSubsection =
                             Boolean(child.subsection) && child.subsection !== prevSub;
@@ -499,11 +536,15 @@ const SidebarLink: React.FC<SidebarLinkProps> = ({
                                     search={{} as any}
                                     onClick={() => onNavigate?.()}
                                     activeProps={{
-                                        className: 'text-healthcare-primary font-bold bg-blue-50 dark:bg-blue-950/40',
+                                        className:
+                                            'text-healthcare-primary font-bold bg-blue-50 dark:bg-blue-950/40',
                                     }}
-                                    className="block px-3 py-2 text-sm text-slate-600 hover:text-healthcare-primary hover:bg-blue-50 dark:hover:bg-slate-800 rounded-md transition-colors whitespace-nowrap"
+                                    className={childLinkClass}
                                 >
-                                    {child.label}
+                                    <span className="flex-shrink-0 text-slate-500 group-hover/child:text-healthcare-primary transition-colors">
+                                        <ChildIcon size={18} strokeWidth={2} />
+                                    </span>
+                                    <span className="font-[inherit]">{child.label}</span>
                                 </Link>
                             </div>
                         );
@@ -543,7 +584,6 @@ export function MainLayout() {
     const [debouncedSearchQuery, setDebouncedSearchQuery] = useState('');
     const globalSearchRef = useRef<HTMLDivElement | null>(null);
 
-    const location = useLocation();
     const effectiveFacilityId = facilityId ?? user?.facility_id ?? undefined;
 
     const isItemAllowed = (item: NavItem): boolean => {
@@ -748,7 +788,7 @@ export function MainLayout() {
                     isMobileMenuOpen ? 'translate-x-0 w-72' : '-translate-x-full lg:translate-x-0',
                 )}
             >
-                <div className="h-20 flex items-center px-6 border-b border-blue-100">
+                <div className="h-20 flex items-center px-6 border-b border-slate-200/70 dark:border-slate-700/60">
                     <div className="flex items-center gap-3 w-full">
                         <div className="relative group">
                             <div className="absolute inset-0 bg-healthcare-primary/20 rounded-xl blur-lg group-hover:bg-healthcare-primary/30 transition-all duration-500" />
@@ -794,23 +834,30 @@ export function MainLayout() {
                                     {section.label}
                                 </p>
                             )}
-                            {section.items.map((item) => (
-                                <SidebarLink
-                                    key={item.to}
-                                    to={item.to}
-                                    icon={<item.icon size={18} />}
-                                    label={item.label}
-                                    isCollapsed={isCollapsed && !isMobileMenuOpen}
-                                    children={item.children}
-                                    currentPath={location.pathname}
-                                    onNavigate={() => setIsMobileMenuOpen(false)}
-                                />
-                            ))}
+                            {section.items.map((item) => {
+                                const flattenExpandedChildren =
+                                    (!!item.children?.length &&
+                                        item.label.trim().toLowerCase() ===
+                                            section.label.trim().toLowerCase()) ||
+                                    !!item.hideParentWhenExpanded;
+                                return (
+                                    <SidebarLink
+                                        key={item.to}
+                                        to={item.to}
+                                        icon={<item.icon size={18} />}
+                                        label={item.label}
+                                        isCollapsed={isCollapsed && !isMobileMenuOpen}
+                                        children={item.children}
+                                        flattenExpandedChildren={flattenExpandedChildren}
+                                        onNavigate={() => setIsMobileMenuOpen(false)}
+                                    />
+                                );
+                            })}
                         </div>
                     ))}
                 </nav>
 
-                <div className="p-2 border-t border-blue-100">
+                <div className="p-2 border-t border-slate-200/70 dark:border-slate-700/60">
                     <button
                         onClick={() => {
                             setIsMobileMenuOpen(false);

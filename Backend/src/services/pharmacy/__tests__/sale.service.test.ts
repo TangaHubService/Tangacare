@@ -6,6 +6,7 @@ import { AuditAction } from '../../../entities/AuditLog.entity';
 import { Stock } from '../../../entities/Stock.entity';
 import { Batch } from '../../../entities/Batch.entity';
 import { Sale } from '../../../entities/Sale.entity';
+import { User } from '../../../entities/User.entity';
 
 // Mock dependencies
 jest.mock('../../../config/database', () => ({
@@ -17,8 +18,8 @@ jest.mock('../../../config/database', () => ({
 
 jest.mock('../stock.service');
 jest.mock('../audit.service');
-jest.mock('../settings.service', () => ({
-    SettingsService: jest.fn().mockImplementation(() => ({
+jest.mock('../settings.service', () => {
+    const SettingsService = jest.fn().mockImplementation(() => ({
         getEffectiveValuesMap: jest.fn().mockResolvedValue({
             'controlled_medicines.rules_enabled': true,
             'controlled_medicines.require_prescription': true,
@@ -32,8 +33,23 @@ jest.mock('../settings.service', () => ({
             return 0.18;
         }),
         getEffectiveValue: jest.fn().mockResolvedValue('RWF'),
-    })),
-}));
+        getRuntimeConfig: jest.fn().mockResolvedValue({
+            currencyDecimals: 2,
+            currencyCode: 'RWF',
+            currencySymbol: 'RWF',
+            currencyRoundingMode: 'half_up',
+            maxDiscountPercent: 20,
+            vatEnabled: true,
+            vatRate: 0.18,
+            locale: 'en-RW',
+            timezone: 'Africa/Kigali',
+            dateFormat: 'DD/MM/YYYY',
+            numberFormat: '1,234.56',
+        }),
+    }));
+    (SettingsService as any).systemDefaultValue = jest.fn(() => 'RWF');
+    return { SettingsService };
+});
 
 const StockService = require('../stock.service').StockService;
 const AuditService = require('../audit.service').AuditService;
@@ -46,6 +62,7 @@ describe('SaleService', () => {
     let mockSalePaymentRepo: any;
     let mockBatchRepo: any;
     let mockStockRepo: any;
+    let mockUserRepo: any;
     let mockStockService: any;
     let mockAuditService: any;
 
@@ -87,6 +104,9 @@ describe('SaleService', () => {
                 }),
             })),
         };
+        mockUserRepo = {
+            findOne: jest.fn().mockResolvedValue({ id: 1, role: 'pharmacist' }),
+        };
 
         mockEntityManager = {
             getRepository: jest.fn((entity) => {
@@ -95,6 +115,7 @@ describe('SaleService', () => {
                 if (entity.name === 'SalePayment') return mockSalePaymentRepo;
                 if (entity === Batch) return mockBatchRepo;
                 if (entity === Stock) return mockStockRepo;
+                if (entity === User) return mockUserRepo;
                 return {};
             }),
             findOne: jest.fn(),
@@ -157,7 +178,8 @@ describe('SaleService', () => {
             expect(mockSaleRepo.save).toHaveBeenCalled();
             expect(mockStockService.deductStockForSale).toHaveBeenCalled();
             expect(mockSalePaymentRepo.save).toHaveBeenCalled();
-            expect(result).toBeDefined();
+            expect(result.sale).toBeDefined();
+            expect(result.warnings).toEqual([]);
         });
 
         it('should successfully create a sale with multiple payments', async () => {
@@ -271,6 +293,25 @@ describe('SaleService', () => {
                 }),
             );
             expect(mockStockService.deductStockForSale).not.toHaveBeenCalled();
+        });
+
+        it('returns a COGS warning when unit cost resolves to 0', async () => {
+            mockBatchRepo.findOne.mockResolvedValue({
+                id: 101,
+                expiry_date: new Date(Date.now() + 10000000),
+                medicine: { name: 'Paracetamol' },
+            });
+            mockStockService.getBatchCost.mockResolvedValue(0);
+            mockSaleRepo.create.mockReturnValue({ id: 1, ...validSaleDto });
+            mockSaleRepo.save.mockResolvedValue({ id: 1, ...validSaleDto });
+            mockSaleItemRepo.create.mockReturnValue({});
+            mockSalePaymentRepo.create.mockReturnValue({});
+            mockSaleRepo.findOne.mockResolvedValue({ id: 1, status: 'PAID' });
+
+            const result = await saleService.createSale(validSaleDto, 1, 1, 1);
+
+            expect(result.warnings.length).toBe(1);
+            expect(result.warnings[0]).toContain('no unit cost');
         });
     });
 });

@@ -650,26 +650,25 @@ export function DispensingPage() {
                 return;
             }
 
-            const response: any = await pharmacyService.createSale(saleData);
-            if (response?.success === false) {
-                toast.error(String(response?.message || 'Checkout failed. Please try again.'), {
-                    duration: 7000,
-                });
-                return;
-            }
+            const { sale, warnings } = await pharmacyService.createSale(saleData);
 
             setSuccessSummary({
                 amount: total,
-                saleId: response.id,
+                saleId: sale.id,
                 paymentMethod: payments[0]?.method ? String(payments[0].method).replace(/_/g, ' ') : 'Cash',
                 date: new Date(),
                 facilityName: currentFacility?.name ?? 'Pharmacy',
                 customerEmail: selectedPatient?.email ?? (selectedPatient as any)?.email ?? null,
             });
             setShowSuccess(true);
-            toast.success('Dispensing completed successfully');
+            toast.success('Sale completed successfully');
+            if (warnings.length > 0) {
+                for (const w of warnings) {
+                    toast(w, { duration: 7500, icon: '⚠️' });
+                }
+            }
             setShowPaymentModal(false);
-            // Success overlay stays open until user clicks "Return to Dispensing"
+            // Success overlay stays open until user clicks "Return to Sell"
         } catch (error) {
             console.error('Checkout failed:', error);
             const message = getApiErrorMessage(error);
@@ -709,10 +708,10 @@ export function DispensingPage() {
                     <div className="flex flex-wrap items-center justify-between gap-2">
                         <div className="space-y-1">
                             <h2 className="text-xl font-black text-healthcare-dark dark:text-white tracking-tight">
-                                Dispense Medicine
+                                Sell
                             </h2>
                             <p className="text-slate-500 font-bold text-xs uppercase tracking-wider">
-                                Point of Sale & Search
+                                POS — search or scan · FEFO batches · checkout
                             </p>
                         </div>
                         {/* Cart / Store indicator - click to show cart items list */}
@@ -1102,7 +1101,7 @@ export function DispensingPage() {
                                 className="flex items-center justify-center gap-2 w-full py-3 px-4 rounded-xl border-2 border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-800 dark:text-slate-200 font-bold hover:bg-slate-50 dark:hover:bg-slate-700/50 transition-all"
                             >
                                 <ArrowLeft size={20} className="text-emerald-600 dark:text-emerald-400" />
-                                Return to Dispensing
+                                Return to Sell
                             </button>
                         </div>
                     </div>

@@ -1291,6 +1291,12 @@ export class CreateDispenseTransactionDto {
     @IsString()
     @IsOptional()
     patient_id_number?: string;
+
+    /** When strict FEFO would block the chosen batch, staff with inventory write access may supply a reason to proceed (audited). */
+    @IsString()
+    @IsOptional()
+    @MaxLength(500)
+    fefo_override_reason?: string;
 }
 
 export class StockTransferItemDto {
@@ -1536,6 +1542,12 @@ export class CreateSaleDto {
     @IsString()
     @IsOptional()
     patient_insurance_number?: string;
+
+    /** When strict FEFO would block the chosen batch, staff with inventory write access may supply a reason to proceed (audited). */
+    @IsString()
+    @IsOptional()
+    @MaxLength(500)
+    fefo_override_reason?: string;
 }
 
 // Customer Returns DTOs
