@@ -3,11 +3,17 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import {
     AlertTriangle,
     ArrowRight,
+    Bell,
     Building2,
+    ChevronDown,
     Clock,
     DollarSign,
+    FileText,
     Filter,
     Package,
+    RefreshCw,
+    ShoppingCart,
+    Truck,
     TrendingDown,
     TrendingUp,
 } from 'lucide-react';
@@ -169,6 +175,44 @@ export const DashboardOwner: React.FC<DashboardOwnerProps> = ({ facilityId }) =>
     const criticalAlerts = panelsData?.criticalAlerts ?? [];
     const topStockMedicines = panelsData?.topStockMedicines ?? [];
     const topSelling = panelsData?.topSelling ?? [];
+    const quickActions = [
+        {
+            to: '/app/sell',
+            label: 'Sell',
+            description: 'POS checkout',
+            icon: ShoppingCart,
+        },
+        {
+            to: '/app/inventory',
+            label: 'Medicines',
+            description: 'Stock catalog',
+            icon: Package,
+        },
+        {
+            to: '/app/order-receive',
+            label: 'Order & receive',
+            description: 'Procurement intake',
+            icon: Truck,
+        },
+        {
+            to: '/app/replenish',
+            label: 'Replenish',
+            description: 'Reorder planning',
+            icon: RefreshCw,
+        },
+        {
+            to: '/app/alerts',
+            label: 'Alerts',
+            description: 'Resolve issues',
+            icon: Bell,
+        },
+        {
+            to: '/app/analytics/sales',
+            label: 'Reports',
+            description: 'Performance insights',
+            icon: FileText,
+        },
+    ];
 
     const { data: summary, isLoading: kpiLoading } = useQuery({
         queryKey: ['dashboard-owner-kpis', facilityId, dateRange, startDate, endDate],
@@ -289,6 +333,37 @@ export const DashboardOwner: React.FC<DashboardOwnerProps> = ({ facilityId }) =>
                 </div>
 
                 <div className="flex flex-wrap items-center gap-3 w-full xl:w-auto">
+                    <details className="relative">
+                        <summary className="inline-flex cursor-pointer list-none items-center gap-2 px-3 py-2 rounded-lg border border-[#E5E7EB] dark:border-slate-700 bg-[#F8FAFC] dark:bg-slate-800 text-xs font-semibold text-[#111827] dark:text-slate-100">
+                            Quick actions
+                            <ChevronDown size={14} />
+                        </summary>
+                        <div className="absolute right-0 z-20 mt-2 w-64 overflow-hidden rounded-xl border border-[#E5E7EB] dark:border-slate-700 bg-white dark:bg-slate-900 shadow-lg">
+                            {quickActions.map((action) => (
+                                <button
+                                    key={action.to}
+                                    type="button"
+                                    onClick={() =>
+                                        navigate({ to: action.to as any, search: {} as any })
+                                    }
+                                    className="w-full px-3 py-2.5 text-left hover:bg-[#F8FAFC] dark:hover:bg-slate-800 transition-colors flex items-start gap-2"
+                                >
+                                    <span className="mt-0.5 rounded-md bg-[#DBEAFE] dark:bg-blue-900/40 p-1.5">
+                                        <action.icon size={13} className="text-[#2563EB] dark:text-blue-300" />
+                                    </span>
+                                    <span className="min-w-0">
+                                        <span className="block text-xs font-semibold text-[#111827] dark:text-slate-100">
+                                            {action.label}
+                                        </span>
+                                        <span className="block text-[11px] text-[#6B7280] dark:text-slate-400">
+                                            {action.description}
+                                        </span>
+                                    </span>
+                                </button>
+                            ))}
+                        </div>
+                    </details>
+
                     <div className="flex p-1 bg-[#F8FAFC] dark:bg-slate-800 rounded-xl border border-[#E5E7EB] dark:border-slate-700">
                         {(['today', '7days', '30days', 'custom'] as const).map((r) => (
                             <button

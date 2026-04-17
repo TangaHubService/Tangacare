@@ -1,11 +1,10 @@
 import { ProtectedRoute } from '../../components/auth/ProtectedRoute';
 import { useAuth } from '../../context/AuthContext';
 import { Navigate } from '@tanstack/react-router';
-import { OperationsTodayPage } from './OperationsTodayPage';
+import { ManagementOverviewPage } from './ManagementOverviewPage';
 
 /**
- * Pharmacy daily landing: operations-focused "Today" view.
- * Management KPIs live at `/app/overview`.
+ * Primary dashboard landing: management overview with KPIs and trends.
  */
 export function DashboardPage() {
     const { user } = useAuth();
@@ -36,7 +35,7 @@ export function DashboardPage() {
                 'DOCTOR',
             ]}
         >
-            <OperationsTodayPage />
+            <ManagementOverviewPage />
         </ProtectedRoute>
     );
 }

@@ -107,7 +107,7 @@ const NAV_SECTIONS: NavSection[] = [
             {
                 to: '/app',
                 icon: LayoutDashboard,
-                label: 'Today',
+                label: 'Dashboard',
                 allowedRoles: [
                     'FACILITY_ADMIN',
                     'FACILITY ADMIN',
@@ -542,7 +542,7 @@ const SidebarLink: React.FC<SidebarLinkProps> = ({
                                     className={childLinkClass}
                                 >
                                     <span className="flex-shrink-0 text-slate-500 group-hover/child:text-healthcare-primary transition-colors">
-                                        <ChildIcon size={18} strokeWidth={2} />
+                                        <ChildIcon size={18} />
                                     </span>
                                     <span className="font-[inherit]">{child.label}</span>
                                 </Link>

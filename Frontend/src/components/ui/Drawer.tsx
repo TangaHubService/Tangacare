@@ -4,6 +4,8 @@ import { X } from 'lucide-react';
 
 type DrawerSize = 'sm' | 'md' | 'lg' | 'xl' | 'full';
 type DrawerPosition = 'right' | 'left';
+const OVERLAY_TRANSITION_MS = 240;
+const PANEL_TRANSITION_MS = 300;
 
 interface DrawerProps {
     isOpen: boolean;
@@ -68,10 +70,11 @@ export const Drawer: React.FC<DrawerProps> = ({
         }
 
         setIsVisible(false);
+        // Wait until the longest transition finishes before unmounting.
         closeTimeoutRef.current = window.setTimeout(() => {
             setShouldRender(false);
             closeTimeoutRef.current = null;
-        }, 260);
+        }, PANEL_TRANSITION_MS + 40);
     }, [isOpen]);
 
     useEffect(() => {
@@ -102,15 +105,16 @@ export const Drawer: React.FC<DrawerProps> = ({
         <>
             <div
                 className={clsx(
-                    'fixed inset-0 z-40 transition-opacity duration-200',
+                    'fixed inset-0 z-40 transition-opacity',
                     showOverlay ? 'bg-black/40 backdrop-blur-[1px]' : 'bg-transparent',
                     isVisible ? 'opacity-100' : 'opacity-0',
                 )}
+                style={{ transitionDuration: `${OVERLAY_TRANSITION_MS}ms` }}
                 onClick={closeOnOverlayClick ? onClose : undefined}
             />
             <aside
                 className={clsx(
-                    'fixed top-0 z-50 h-full w-full bg-white dark:bg-slate-900 shadow-2xl transition-transform duration-300 ease-out flex flex-col',
+                    'fixed top-0 z-50 h-full w-full bg-white dark:bg-slate-900 shadow-2xl transition-transform ease-out flex flex-col',
                     position === 'right'
                         ? 'right-0 border-l border-slate-200 dark:border-slate-700'
                         : 'left-0 border-r border-slate-200 dark:border-slate-700',
@@ -121,6 +125,7 @@ export const Drawer: React.FC<DrawerProps> = ({
                           ? 'translate-x-full'
                           : '-translate-x-full',
                 )}
+                style={{ transitionDuration: `${PANEL_TRANSITION_MS}ms` }}
                 role="dialog"
                 aria-modal={showOverlay}
             >

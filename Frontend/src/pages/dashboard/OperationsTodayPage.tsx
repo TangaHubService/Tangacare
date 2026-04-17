@@ -1,4 +1,4 @@
-import React, { useMemo } from 'react';
+import { useMemo } from 'react';
 import { Link } from '@tanstack/react-router';
 import { useQuery } from '@tanstack/react-query';
 import {
@@ -10,6 +10,7 @@ import {
     Bell,
     FileText,
     ArrowRight,
+    ChevronDown,
     AlertTriangle,
     BarChart3,
 } from 'lucide-react';
@@ -157,24 +158,59 @@ export function OperationsTodayPage() {
                     </p>
                     <h1 className="text-2xl font-black text-healthcare-dark dark:text-white flex items-center gap-2">
                         <LayoutDashboard className="text-healthcare-primary" size={28} />
-                        Today
+                        Dashboard
                     </h1>
                     <p className="text-slate-500 text-sm mt-1 max-w-xl">
                         Start here for daily pharmacy work: selling, stock health, purchasing, and
                         exceptions that need attention.
                     </p>
                 </div>
-                {showManagementOverview && (
-                    <Link
-                        to="/app/overview"
-                        search={{} as any}
-                        className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 text-sm font-bold text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors"
-                    >
-                        <BarChart3 size={18} className="text-healthcare-primary" />
-                        Management overview
-                        <ArrowRight size={16} />
-                    </Link>
-                )}
+                <div className="flex items-center gap-2">
+                    <details className="relative group">
+                        <summary className="inline-flex cursor-pointer list-none items-center gap-2 px-4 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 text-sm font-bold text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors">
+                            Quick actions
+                            <ChevronDown size={16} />
+                        </summary>
+                        <div className="absolute right-0 z-20 mt-2 w-72 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 shadow-lg overflow-hidden">
+                            {quickActions.map((action) => (
+                                <Link
+                                    key={action.to}
+                                    to={action.to as any}
+                                    search={{} as any}
+                                    className="flex items-start gap-3 px-3 py-2.5 hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors"
+                                >
+                                    <span
+                                        className={cn(
+                                            'mt-0.5 h-8 w-8 rounded-lg flex items-center justify-center shrink-0',
+                                            action.accent,
+                                        )}
+                                    >
+                                        <action.icon size={16} />
+                                    </span>
+                                    <span className="min-w-0">
+                                        <span className="block text-sm font-bold text-healthcare-dark dark:text-white">
+                                            {action.label}
+                                        </span>
+                                        <span className="block text-xs text-slate-500 truncate">
+                                            {action.description}
+                                        </span>
+                                    </span>
+                                </Link>
+                            ))}
+                        </div>
+                    </details>
+                    {showManagementOverview && (
+                        <Link
+                            to="/app/overview"
+                            search={{} as any}
+                            className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 text-sm font-bold text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors"
+                        >
+                            <BarChart3 size={18} className="text-healthcare-primary" />
+                            Management overview
+                            <ArrowRight size={16} />
+                        </Link>
+                    )}
+                </div>
             </div>
 
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
@@ -238,7 +274,7 @@ export function OperationsTodayPage() {
                                 {alertSummaryLoading ? '—' : summary?.expired ?? '—'}
                             </p>
                             <Link
-                                to="/app/recalls"
+                                to={'/app/recalls' as any}
                                 search={{} as any}
                                 className="text-xs font-bold text-red-700 dark:text-red-300 mt-2 inline-flex items-center gap-1"
                             >
@@ -247,41 +283,6 @@ export function OperationsTodayPage() {
                         </div>
                     </>
                 )}
-            </div>
-
-            <div>
-                <h2 className="text-sm font-black uppercase tracking-widest text-slate-400 mb-3">
-                    Quick actions
-                </h2>
-                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
-                    {quickActions.map((action) => (
-                        <Link
-                            key={action.to}
-                            to={action.to as any}
-                            search={{} as any}
-                            className="group flex gap-3 rounded-2xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900/30 p-4 hover:border-healthcare-primary/40 hover:shadow-md transition-all"
-                        >
-                            <div
-                                className={cn(
-                                    'h-11 w-11 rounded-xl flex items-center justify-center shrink-0',
-                                    action.accent,
-                                )}
-                            >
-                                <action.icon size={22} />
-                            </div>
-                            <div className="min-w-0">
-                                <p className="font-black text-healthcare-dark dark:text-white group-hover:text-healthcare-primary transition-colors">
-                                    {action.label}
-                                </p>
-                                <p className="text-xs text-slate-500 mt-0.5">{action.description}</p>
-                            </div>
-                            <ArrowRight
-                                size={18}
-                                className="ml-auto text-slate-300 group-hover:text-healthcare-primary transition-colors shrink-0"
-                            />
-                        </Link>
-                    ))}
-                </div>
             </div>
 
             {canReadAlerts && (
