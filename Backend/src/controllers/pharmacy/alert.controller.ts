@@ -1,6 +1,7 @@
 import { Response, NextFunction } from 'express';
 import { AppDataSource } from '../../config/database';
 import { Alert, AlertStatus, AlertType } from '../../entities/Alert.entity';
+import { AlertDeliveryLog } from '../../entities/AlertDeliveryLog.entity';
 import { AlertEventType } from '../../entities/AlertEvent.entity';
 import { AuthRequest } from '../../middleware/auth.middleware';
 import { AppError } from '../../middleware/error.middleware';
@@ -22,6 +23,7 @@ const ALERT_RESOLUTION_ACTIONS: Record<AlertType, string[]> = {
 export class AlertController {
     private alertService: AlertService;
     private alertRepository = AppDataSource.getRepository(Alert);
+    private deliveryLogRepository = AppDataSource.getRepository(AlertDeliveryLog);
 
     constructor() {
         this.alertService = new AlertService();
@@ -308,6 +310,37 @@ export class AlertController {
             res.status(200).json({
                 status: 'success',
                 message: 'Alerts generated successfully',
+            });
+        } catch (error) {
+            next(error);
+        }
+    };
+
+    listDeliveryLogs = async (req: AuthRequest, res: Response, next: NextFunction) => {
+        try {
+            const facilityId = resolveFacilityId(req);
+            const organizationId = resolveOrganizationId(req);
+            if (!facilityId || !organizationId) {
+                throw new AppError('Facility and organization scope are required', 400);
+            }
+            const page = Math.max(1, parseInt(String(req.query.page || '1'), 10) || 1);
+            const limit = Math.min(200, Math.max(1, parseInt(String(req.query.limit || '50'), 10) || 50));
+
+            const qb = this.deliveryLogRepository
+                .createQueryBuilder('log')
+                .leftJoinAndSelect('log.alert', 'alert')
+                .where('alert.facility_id = :facilityId', { facilityId })
+                .andWhere('alert.organization_id = :organizationId', { organizationId })
+                .orderBy('log.created_at', 'DESC')
+                .skip((page - 1) * limit)
+                .take(limit);
+
+            const [data, total] = await qb.getManyAndCount();
+
+            res.status(200).json({
+                status: 'success',
+                message: 'Alert delivery logs retrieved',
+                data: { data, total, page, limit },
             });
         } catch (error) {
             next(error);

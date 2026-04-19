@@ -101,6 +101,7 @@ describe('SaleService', () => {
                 getOne: jest.fn().mockResolvedValue({
                     id: 1,
                     is_frozen: false,
+                    stock_status: 'saleable',
                 }),
             })),
         };
@@ -163,7 +164,7 @@ describe('SaleService', () => {
             mockBatchRepo.findOne.mockResolvedValue({
                 id: 101,
                 expiry_date: new Date(Date.now() + 10000000), // Future date
-                medicine: { name: 'Paracetamol' },
+                medicine: { name: 'Paracetamol', drug_schedule: 'unclassified' },
             });
             mockSaleRepo.create.mockReturnValue({ id: 1, ...validSaleDto });
             mockSaleRepo.save.mockResolvedValue({ id: 1, ...validSaleDto });
@@ -194,7 +195,7 @@ describe('SaleService', () => {
             mockBatchRepo.findOne.mockResolvedValue({
                 id: 101,
                 expiry_date: new Date(Date.now() + 10000000),
-                medicine: { name: 'Paracetamol' },
+                medicine: { name: 'Paracetamol', drug_schedule: 'unclassified' },
             });
             mockSaleRepo.create.mockReturnValue({ id: 1 });
             mockSaleRepo.save.mockResolvedValue({ id: 1 });
@@ -210,7 +211,7 @@ describe('SaleService', () => {
             mockBatchRepo.findOne.mockResolvedValue({
                 id: 101,
                 expiry_date: new Date(Date.now() + 10000000),
-                medicine: { name: 'Paracetamol' },
+                medicine: { name: 'Paracetamol', drug_schedule: 'unclassified' },
             });
             mockStockService.checkStockAvailability.mockResolvedValue(false);
 
@@ -225,7 +226,7 @@ describe('SaleService', () => {
                 id: 101,
                 expiry_date: new Date(Date.now() - 10000000), // Past date
                 batch_number: 'B123',
-                medicine: { name: 'Paracetamol' },
+                medicine: { name: 'Paracetamol', drug_schedule: 'unclassified' },
             });
 
             await expect(saleService.createSale(validSaleDto, 1, 1, 1)).rejects.toThrow(/Cannot sell expired item/);
@@ -243,7 +244,7 @@ describe('SaleService', () => {
             mockBatchRepo.findOne.mockResolvedValue({
                 id: 101,
                 expiry_date: new Date(Date.now() + 10000000),
-                medicine: { name: 'Paracetamol' },
+                medicine: { name: 'Paracetamol', drug_schedule: 'unclassified' },
             });
             mockStockService.checkStockAvailability.mockResolvedValue(true);
             mockStockService.getBatchCost.mockResolvedValue(600); // Cost 600, Price 500
@@ -270,11 +271,12 @@ describe('SaleService', () => {
                 reserved_quantity: 0,
                 is_frozen: false,
                 is_deleted: false,
+                stock_status: 'saleable',
             });
             mockBatchRepo.findOne.mockResolvedValue({
                 id: 101,
                 expiry_date: new Date(Date.now() + 10000000),
-                medicine: { name: 'Paracetamol' },
+                medicine: { name: 'Paracetamol', drug_schedule: 'unclassified' },
             });
             mockSaleRepo.create.mockReturnValue({ id: 1, ...saleWithStockId });
             mockSaleRepo.save.mockResolvedValue({ id: 1, ...saleWithStockId });
@@ -299,7 +301,7 @@ describe('SaleService', () => {
             mockBatchRepo.findOne.mockResolvedValue({
                 id: 101,
                 expiry_date: new Date(Date.now() + 10000000),
-                medicine: { name: 'Paracetamol' },
+                medicine: { name: 'Paracetamol', drug_schedule: 'unclassified' },
             });
             mockStockService.getBatchCost.mockResolvedValue(0);
             mockSaleRepo.create.mockReturnValue({ id: 1, ...validSaleDto });

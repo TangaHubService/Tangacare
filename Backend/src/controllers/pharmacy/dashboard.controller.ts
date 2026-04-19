@@ -7,6 +7,7 @@ import { AlertService } from '../../services/pharmacy/alert.service';
 import { ResponseUtil } from '../../utils/response.util';
 import { User, UserRole } from '../../entities/User.entity';
 import { DispenseTransaction } from '../../entities/DispenseTransaction.entity';
+import { SaleItem, SaleStatus } from '../../entities/Sale.entity';
 import { StatsService } from '../../services/pharmacy/stats.service';
 import { resolveFacilityId, resolveOrganizationId } from '../../utils/request.util';
 
@@ -248,21 +249,84 @@ export class DashboardController {
                 return;
             }
 
-            const result = await AppDataSource.getRepository(DispenseTransaction)
-                .createQueryBuilder('dt')
-                .select('m.name', 'name')
-                .addSelect('SUM(dt.quantity)', 'value')
-                .innerJoin('dt.medicine', 'm')
-                .where('dt.facility_id = :facilityId', { facilityId })
-                .andWhere('dt.organization_id = :organizationId', { organizationId })
-                .groupBy('m.name')
-                .orderBy('SUM(dt.quantity)', order)
-                .limit(5)
-                .getRawMany();
+            type AggRow = { medicine_id: number; name: string; quantity: number; revenue: number };
+            const toNum = (v: unknown): number => {
+                const n = parseFloat(String(v));
+                return Number.isFinite(n) ? n : 0;
+            };
 
-            const formattedResult = result.map((item) => ({
-                name: item.name,
-                value: parseFloat(item.value),
+            const mergeRows = (
+                map: Map<number, AggRow>,
+                rows: Array<{ medicine_id: unknown; name: string; quantity: unknown; revenue: unknown }>,
+            ) => {
+                for (const row of rows) {
+                    const id = Number(row.medicine_id);
+                    if (!Number.isFinite(id)) continue;
+                    const q = toNum(row.quantity);
+                    const r = toNum(row.revenue);
+                    const existing = map.get(id);
+                    if (existing) {
+                        existing.quantity += q;
+                        existing.revenue += r;
+                    } else {
+                        map.set(id, { medicine_id: id, name: row.name, quantity: q, revenue: r });
+                    }
+                }
+            };
+
+            const [saleRows, dispenseRows] = await Promise.all([
+                AppDataSource.getRepository(SaleItem)
+                    .createQueryBuilder('si')
+                    .innerJoin('si.sale', 's')
+                    .innerJoin('si.medicine', 'm')
+                    .select('m.id', 'medicine_id')
+                    .addSelect('m.name', 'name')
+                    .addSelect('SUM(si.quantity)', 'quantity')
+                    .addSelect('SUM(si.total_price)', 'revenue')
+                    .where('s.facility_id = :facilityId', { facilityId })
+                    .andWhere('s.organization_id = :organizationId', { organizationId })
+                    .andWhere('s.status != :voided', { voided: SaleStatus.VOIDED })
+                    .groupBy('m.id')
+                    .addGroupBy('m.name')
+                    .getRawMany(),
+                AppDataSource.getRepository(DispenseTransaction)
+                    .createQueryBuilder('dt')
+                    .innerJoin('dt.medicine', 'm')
+                    .select('m.id', 'medicine_id')
+                    .addSelect('m.name', 'name')
+                    .addSelect('SUM(dt.quantity)', 'quantity')
+                    .addSelect(
+                        'SUM(COALESCE(dt.total_amount, dt.quantity * COALESCE(dt.unit_price, 0)))',
+                        'revenue',
+                    )
+                    .where('dt.facility_id = :facilityId', { facilityId })
+                    .andWhere('dt.organization_id = :organizationId', { organizationId })
+                    .groupBy('m.id')
+                    .addGroupBy('m.name')
+                    .getRawMany(),
+            ]);
+
+            const byMedicine = new Map<number, AggRow>();
+            mergeRows(byMedicine, saleRows as any[]);
+            mergeRows(byMedicine, dispenseRows as any[]);
+
+            const merged = Array.from(byMedicine.values());
+            merged.sort((a, b) => {
+                if (order === 'DESC') {
+                    if (b.revenue !== a.revenue) return b.revenue - a.revenue;
+                    return b.quantity - a.quantity;
+                }
+                if (a.revenue !== b.revenue) return a.revenue - b.revenue;
+                return a.quantity - b.quantity;
+            });
+
+            const formattedResult = merged.slice(0, 5).map((row) => ({
+                name: row.name,
+                medicine_id: row.medicine_id,
+                /** Units sold (POS + dispensing) */
+                value: row.quantity,
+                quantity: row.quantity,
+                revenue: Math.round(row.revenue * 100) / 100,
             }));
 
             ResponseUtil.success(

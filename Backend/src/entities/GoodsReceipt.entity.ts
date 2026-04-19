@@ -44,6 +44,15 @@ export class GoodsReceipt {
     @Column({ type: 'text', nullable: true })
     notes: string;
 
+    @Column({ type: 'text', nullable: true })
+    storage_condition_note: string | null;
+
+    @Column({ type: 'boolean', nullable: true })
+    qc_pass: boolean | null;
+
+    @Column({ type: 'varchar', length: 512, nullable: true })
+    coa_attachment_url: string | null;
+
     @CreateDateColumn({ type: 'timestamp with time zone' })
     created_at: Date;
 
@@ -97,6 +106,15 @@ export class GoodsReceiptItem {
 
     @Column({ type: 'date', nullable: true })
     expiry_date: Date;
+
+    @Column({ type: 'boolean', nullable: true })
+    qc_pass: boolean | null;
+
+    @Column({ type: 'int', nullable: true })
+    variance_quantity: number | null;
+
+    @Column({ type: 'text', nullable: true })
+    storage_condition_note: string | null;
 
     @CreateDateColumn({ type: 'timestamp with time zone' })
     created_at: Date;

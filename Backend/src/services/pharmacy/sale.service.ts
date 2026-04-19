@@ -5,6 +5,8 @@ import { AppError } from '../../middleware/error.middleware';
 import { Sale, SaleItem, SalePayment, SalePaymentMethod, SaleStatus } from '../../entities/Sale.entity';
 import { User, UserRole } from '../../entities/User.entity';
 import { Batch } from '../../entities/Batch.entity';
+import { DrugSchedule } from '../../entities/Medicine.entity';
+import { StockStatus } from '../../entities/Stock.entity';
 import { InsuranceProvider } from '../../entities/InsuranceProvider.entity';
 import { CreateSaleDto } from '../../dto/pharmacy.dto';
 import { StockService } from './stock.service';
@@ -69,6 +71,9 @@ export class SaleService {
             );
             const requirePatientId = Boolean(
                 effectiveSettings[SETTINGS_KEYS.CONTROLLED_REQUIRE_PATIENT_ID] ?? false,
+            );
+            const rxScheduleEnforced = Boolean(
+                effectiveSettings[SETTINGS_KEYS.RX_SCHEDULE_ENFORCEMENT_ENABLED] ?? true,
             );
             const fefoStrict = Boolean(effectiveSettings[SETTINGS_KEYS.INVENTORY_FEFO_STRICT] ?? true);
             const vatEnabled = Boolean(effectiveSettings[SETTINGS_KEYS.TAX_VAT_ENABLED] ?? true);
@@ -177,9 +182,41 @@ export class SaleService {
                     }
                 }
 
+                if (
+                    rxScheduleEnforced &&
+                    batch.medicine?.drug_schedule === DrugSchedule.PRESCRIPTION_ONLY &&
+                    !createDto.prescription_id
+                ) {
+                    await auditService.log({
+                        facility_id: facilityId,
+                        user_id: cashierId,
+                        organization_id: organizationId,
+                        action: AuditAction.ACCESS_DENIED,
+                        entity_type: AuditEntityType.SALE,
+                        entity_id: 0,
+                        entity_name: 'Prescription-only sale',
+                        description: `BLOCKED: Prescription-only medicine without prescription: ${batch.medicine.name}`,
+                    });
+                    throw new AppError(
+                        `Prescription is required for prescription-only medicine: ${batch.medicine.name}`,
+                        400,
+                    );
+                }
+
                 if (stockSnapshot?.is_frozen) {
                     throw new AppError(
                         `Batch ${batch.batch_number} is quarantined/frozen and cannot be dispensed`,
+                        409,
+                    );
+                }
+
+                if (
+                    stockSnapshot &&
+                    stockSnapshot.stock_status != null &&
+                    stockSnapshot.stock_status !== StockStatus.SALEABLE
+                ) {
+                    throw new AppError(
+                        `Batch ${batch.batch_number} is not saleable (status: ${stockSnapshot.stock_status})`,
                         409,
                     );
                 }

@@ -18,6 +18,19 @@ router.post('/check-stock', authorize(UserRole.FACILITY_ADMIN, UserRole.STORE_MA
 router.post('/check-expiry', authorize(UserRole.FACILITY_ADMIN, UserRole.STORE_MANAGER), alertController.checkExpiries);
 
 router.get(
+    '/delivery-logs',
+    authorize(
+        UserRole.SUPER_ADMIN,
+        UserRole.FACILITY_ADMIN,
+        UserRole.OWNER,
+        UserRole.ADMIN,
+        UserRole.STORE_MANAGER,
+        UserRole.AUDITOR,
+    ),
+    alertController.listDeliveryLogs,
+);
+
+router.get(
     '/',
     authorize(
         UserRole.SUPER_ADMIN,

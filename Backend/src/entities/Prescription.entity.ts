@@ -10,17 +10,32 @@ export class Prescription {
     @PrimaryGeneratedColumn()
     id: number;
 
-    @Column({ type: 'int' })
-    appointment_id: number;
+    @Column({ type: 'int', nullable: true })
+    appointment_id: number | null;
 
-    @Column({ type: 'int' })
-    doctor_id: number;
+    @Column({ type: 'int', nullable: true })
+    doctor_id: number | null;
 
-    @Column({ type: 'int' })
-    patient_id: number;
+    @Column({ type: 'int', nullable: true })
+    patient_id: number | null;
 
     @Column({ type: 'int', nullable: true })
     organization_id: number;
+
+    @Column({ type: 'int', nullable: true })
+    facility_id: number | null;
+
+    @Column({ type: 'varchar', length: 255, nullable: true })
+    external_prescriber_name: string | null;
+
+    @Column({ type: 'varchar', length: 120, nullable: true })
+    external_prescriber_license: string | null;
+
+    @Column({ type: 'varchar', length: 255, nullable: true })
+    walk_in_patient_name: string | null;
+
+    @Column({ type: 'varchar', length: 120, nullable: true })
+    walk_in_patient_identifier: string | null;
 
     @Column({ type: 'text' })
     prescription_text: string;
@@ -50,19 +65,21 @@ export class Prescription {
 
     @ManyToOne(() => Appointment, (appointment) => appointment.prescriptions, {
         onDelete: 'CASCADE',
+        nullable: true,
     })
     @JoinColumn({ name: 'appointment_id' })
-    appointment: Appointment;
+    appointment: Appointment | null;
 
     @ManyToOne(() => Doctor, (doctor) => doctor.prescriptions, {
         onDelete: 'CASCADE',
+        nullable: true,
     })
     @JoinColumn({ name: 'doctor_id' })
-    doctor: Doctor;
+    doctor: Doctor | null;
 
-    @ManyToOne(() => User, (user) => user.prescriptions, { onDelete: 'CASCADE' })
+    @ManyToOne(() => User, (user) => user.prescriptions, { onDelete: 'CASCADE', nullable: true })
     @JoinColumn({ name: 'patient_id' })
-    patient: User;
+    patient: User | null;
 
     @ManyToOne(() => Organization, { nullable: true, onDelete: 'SET NULL' })
     @JoinColumn({ name: 'organization_id' })

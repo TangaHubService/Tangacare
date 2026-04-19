@@ -114,6 +114,24 @@ export class ReportingController {
         }
     };
 
+    getBatchStockReconciliation = async (req: Request, res: Response): Promise<void> => {
+        try {
+            const facilityId = resolveFacilityId(req);
+            if (!facilityId) {
+                ResponseUtil.badRequest(res, 'Facility ID is required');
+                return;
+            }
+            const organizationId = resolveOrganizationId(req);
+            const result = await this.reportingService.getBatchStockReconciliation(
+                facilityId,
+                organizationId ?? undefined,
+            );
+            ResponseUtil.success(res, result, 'Batch vs stock reconciliation retrieved successfully');
+        } catch (error: any) {
+            ResponseUtil.internalError(res, 'Failed to build batch stock reconciliation', error.message);
+        }
+    };
+
     getDailyCash = async (req: Request, res: Response): Promise<void> => {
         try {
             const facilityId = resolveFacilityId(req);
@@ -744,6 +762,89 @@ export class ReportingController {
                 return;
             }
             ResponseUtil.internalError(res, 'Failed to export report', error.message);
+        }
+    };
+
+    /** CSV export of controlled-medicine register lines (inspectors expect tabular register, not raw audit JSON). */
+    exportControlledMedicineRegisterCsv = async (req: Request, res: Response): Promise<void> => {
+        try {
+            const facilityId = resolveFacilityId(req);
+            if (!facilityId) {
+                ResponseUtil.badRequest(res, 'Facility ID is required');
+                return;
+            }
+            const organizationId = this.requireOrganizationId(req, res);
+            if (!organizationId) {
+                return;
+            }
+
+            let startDate: Date;
+            let endDate: Date;
+            const { start_date, end_date } = req.query;
+            if (start_date && end_date) {
+                startDate = new Date(start_date as string);
+                endDate = new Date(end_date as string);
+                endDate.setHours(23, 59, 59, 999);
+            } else {
+                endDate = new Date();
+                endDate.setHours(23, 59, 59, 999);
+                startDate = new Date(endDate);
+                startDate.setDate(startDate.getDate() - 29);
+                startDate.setHours(0, 0, 0, 0);
+            }
+
+            const result = await this.reportingService.getControlledDrugsRegisterReport(
+                facilityId,
+                startDate,
+                endDate,
+                organizationId,
+            );
+
+            const headers = [
+                'sale_id',
+                'sale_number',
+                'date',
+                'medicine_name',
+                'drug_schedule',
+                'batch_number',
+                'quantity',
+                'prescription_id',
+                'patient_id_number',
+                'patient_name',
+                'cashier_name',
+            ];
+            const escape = (v: unknown) => {
+                const s = v === null || v === undefined ? '' : String(v);
+                if (s.includes(',') || s.includes('"') || s.includes('\n')) {
+                    return `"${s.replace(/"/g, '""')}"`;
+                }
+                return s;
+            };
+            const lines = [headers.join(',')];
+            for (const row of result.transactions) {
+                lines.push(
+                    [
+                        escape(row.sale_id),
+                        escape(row.sale_number),
+                        escape(row.date),
+                        escape(row.medicine_name),
+                        escape((row as any).drug_schedule),
+                        escape(row.batch_number),
+                        escape(row.quantity),
+                        escape((row as any).prescription_id),
+                        escape((row as any).patient_id_number),
+                        escape(row.patient_name),
+                        escape(row.cashier_name),
+                    ].join(','),
+                );
+            }
+
+            const fname = `controlled_medicine_register_${facilityId}_${startDate.toISOString().split('T')[0]}_${endDate.toISOString().split('T')[0]}.csv`;
+            res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+            res.setHeader('Content-Disposition', `attachment; filename="${fname}"`);
+            res.status(200).send(lines.join('\n'));
+        } catch (error: any) {
+            ResponseUtil.internalError(res, 'Failed to export controlled medicine register', error.message);
         }
     };
 }

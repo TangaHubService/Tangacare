@@ -1,7 +1,7 @@
 import { Repository, IsNull, EntityManager, In } from 'typeorm';
 import { AppDataSource } from '../../config/database';
 import { AppError } from '../../middleware/error.middleware';
-import { Stock } from '../../entities/Stock.entity';
+import { Stock, StockStatus } from '../../entities/Stock.entity';
 import { Facility } from '../../entities/Facility.entity';
 import { Batch } from '../../entities/Batch.entity';
 import { BatchService } from './batch.service';
@@ -22,6 +22,8 @@ export interface StockMovementMetadata {
     location_id?: number;
     user_id?: number;
     notes?: string;
+    /** When adding stock, set row disposition (defaults to saleable). */
+    initial_stock_status?: StockStatus;
 }
 
 export class StockService {
@@ -96,10 +98,14 @@ export class StockService {
         });
 
         const previousBalance = stock ? stock.quantity : 0;
+        const incomingStatus = metadata?.initial_stock_status ?? StockStatus.SALEABLE;
         if (stock) {
             stock.quantity += quantity;
             if (unitCost !== undefined) stock.unit_cost = unitCost;
             if (unitPrice !== undefined) stock.unit_price = unitPrice;
+            if (metadata?.initial_stock_status !== undefined) {
+                stock.stock_status = metadata.initial_stock_status;
+            }
         } else {
             stock = this.stockRepository.create({
                 facility_id: facilityId,
@@ -111,6 +117,7 @@ export class StockService {
                 quantity,
                 unit_cost: unitCost,
                 unit_price: unitPrice,
+                stock_status: incomingStatus,
             });
         }
 
@@ -181,8 +188,7 @@ export class StockService {
     }
 
     private async recordMovement(data: Partial<StockMovement>): Promise<void> {
-        const movement = this.stockMovementRepository.create(data);
-        await this.stockMovementRepository.save(movement);
+        await this.stockMovementRepository.insert(this.stockMovementRepository.create(data) as any);
     }
 
     private async checkIfFrozen(facilityId: number, organizationId: number, medicineId: number, batchId: number, departmentId: number | null): Promise<void> {
@@ -276,6 +282,7 @@ export class StockService {
             .andWhere('stock.medicine_id = :medicineId', { medicineId })
             .andWhere('(stock.quantity - COALESCE(stock.reserved_quantity, 0)) > 0')
             .andWhere('stock.is_deleted = :isDeleted', { isDeleted: false })
+            .andWhere('stock.stock_status = :saleable', { saleable: StockStatus.SALEABLE })
             .orderBy('batch.expiry_date', 'ASC');
 
         if (departmentId === null) {
@@ -321,6 +328,7 @@ export class StockService {
             .andWhere('stock.batch_id = :batchId', { batchId })
             .andWhere('(stock.quantity - COALESCE(stock.reserved_quantity, 0)) > 0')
             .andWhere('stock.is_deleted = :isDeleted', { isDeleted: false })
+            .andWhere('stock.stock_status = :saleable', { saleable: StockStatus.SALEABLE })
             .orderBy('batch.expiry_date', 'ASC');
 
         if (departmentId === null) {
@@ -425,6 +433,13 @@ export class StockService {
 
         if (stock.is_frozen) {
             throw new AppError('Stock is currently frozen for physical counting and cannot be moved', 409);
+        }
+
+        if (stock.stock_status !== StockStatus.SALEABLE) {
+            throw new AppError(
+                `Stock is in status "${stock.stock_status}" and cannot be sold, transferred, or adjusted out`,
+                409,
+            );
         }
 
         const availableQuantity = stock.quantity - (stock.reserved_quantity || 0);
@@ -548,6 +563,7 @@ export class StockService {
             .andWhere('stock.medicine_id = :medicineId', { medicineId })
             .andWhere('stock.batch_id = :batchId', { batchId })
             .andWhere('stock.is_deleted = :isDeleted', { isDeleted: false })
+            .andWhere('stock.stock_status = :saleable', { saleable: StockStatus.SALEABLE })
             .andWhere('(stock.quantity - COALESCE(stock.reserved_quantity, 0)) >= :qty', { qty: quantity });
 
         if (departmentId === null || departmentId === undefined) {
@@ -566,6 +582,13 @@ export class StockService {
 
         if (stock.is_frozen) {
             throw new AppError('Stock is currently frozen for physical counting and cannot be moved', 409);
+        }
+
+        if (stock.stock_status !== StockStatus.SALEABLE) {
+            throw new AppError(
+                `Stock is in status "${stock.stock_status}" and cannot be sold or transferred out`,
+                409,
+            );
         }
 
         const availableQuantity = stock.quantity - stock.reserved_quantity;
@@ -670,6 +693,8 @@ export class StockService {
             stock.quantity += quantity;
         }
 
+        stock.stock_status = StockStatus.PENDING_QC;
+
         await this.batchService.increaseCurrentQuantity(batchId, quantity, organizationId);
         await this.stockRepository.save(stock);
 
@@ -687,7 +712,7 @@ export class StockService {
             reference_type: 'customer_return',
             reference_id: returnId,
             user_id: userId,
-            notes: `Stock restored from customer return`,
+            notes: `Stock restored from customer return (pending QC before sale)`,
         });
     }
 
@@ -742,6 +767,7 @@ export class StockService {
             medicine_id: medicineId,
             batch_id: batchId,
             is_deleted: false,
+            stock_status: StockStatus.SALEABLE,
         };
         if (departmentId === null || departmentId === undefined) {
             whereCondition.department_id = IsNull();
@@ -769,7 +795,8 @@ export class StockService {
             .where('stock.facility_id = :facilityId', { facilityId })
             .andWhere('stock.organization_id = :organizationId', { organizationId })
             .andWhere('stock.medicine_id = :medicineId', { medicineId })
-            .andWhere('stock.is_deleted = :isDeleted', { isDeleted: false });
+            .andWhere('stock.is_deleted = :isDeleted', { isDeleted: false })
+            .andWhere('stock.stock_status = :saleable', { saleable: StockStatus.SALEABLE });
 
         if (departmentId === null || departmentId === undefined) {
             queryBuilder.andWhere('stock.department_id IS NULL');
@@ -800,6 +827,17 @@ export class StockService {
 
         if (!sourceStock) {
             throw new AppError('Source stock record not found', 404);
+        }
+
+        if (sourceStock.is_frozen) {
+            throw new AppError('Source stock is frozen for physical counting and cannot be moved', 409);
+        }
+
+        if (sourceStock.stock_status !== StockStatus.SALEABLE) {
+            throw new AppError(
+                `Only saleable stock can be moved between locations (current status: ${sourceStock.stock_status})`,
+                409,
+            );
         }
 
         if (sourceStock.location_id === targetLocationId) {
@@ -856,8 +894,33 @@ export class StockService {
                 reference_id: sourceStockId,
                 user_id: userId,
                 notes: notes || 'Stock transfer between shelves',
+                initial_stock_status: sourceStock.stock_status,
             },
         );
+    }
+
+    /**
+     * Release stock from post-return / post-receipt QC hold to saleable.
+     */
+    async releaseStockFromQc(
+        stockId: number,
+        facilityId: number,
+        organizationId: number,
+        _userId: number,
+    ): Promise<Stock> {
+        void _userId;
+        const stock = await this.stockRepository.findOne({
+            where: { id: stockId, facility_id: facilityId, organization_id: organizationId, is_deleted: false },
+            lock: { mode: 'pessimistic_write' },
+        });
+        if (!stock) {
+            throw new AppError('Stock record not found', 404);
+        }
+        if (stock.stock_status !== StockStatus.PENDING_QC) {
+            throw new AppError(`Stock is not pending QC (status: ${stock.stock_status})`, 400);
+        }
+        stock.stock_status = StockStatus.SALEABLE;
+        return await this.stockRepository.save(stock);
     }
 
     /**
@@ -1008,6 +1071,7 @@ export class StockService {
             .andWhere('stock.medicine_id = :medicineId', { medicineId })
             .andWhere('(stock.quantity - COALESCE(stock.reserved_quantity, 0)) > 0')
             .andWhere('stock.is_deleted = :isDeleted', { isDeleted: false })
+            .andWhere('stock.stock_status = :saleable', { saleable: StockStatus.SALEABLE })
             .orderBy('batch.expiry_date', 'ASC')
             .addOrderBy('stock.id', 'ASC')
             .getOne();

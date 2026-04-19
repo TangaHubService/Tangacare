@@ -68,6 +68,7 @@ describe('StockService', () => {
         mockStockMovementRepository = {
             create: jest.fn((d) => d),
             save: jest.fn((d) => Promise.resolve(d)),
+            insert: jest.fn().mockResolvedValue({ identifiers: [], generatedMaps: [], raw: [] }),
         };
 
         (AppDataSource.getRepository as jest.Mock).mockImplementation((entity) => {
@@ -179,6 +180,7 @@ describe('StockService', () => {
                 reserved_quantity: 0,
                 location_id: 1,
                 is_frozen: false,
+                stock_status: 'saleable',
             };
             const mockQueryBuilder = {
                 setLock: jest.fn().mockReturnThis(),
@@ -200,7 +202,7 @@ describe('StockService', () => {
         });
 
         it('should throw error if insufficient stock', async () => {
-            const stock = { id: 1, quantity: 5, batch_id: 1, is_frozen: false };
+            const stock = { id: 1, quantity: 5, batch_id: 1, is_frozen: false, stock_status: 'saleable' };
             const mockQueryBuilder = {
                 setLock: jest.fn().mockReturnThis(),
                 where: jest.fn().mockReturnThis(),
@@ -214,7 +216,7 @@ describe('StockService', () => {
         });
 
         it('should throw error if stock is frozen during deduction', async () => {
-            const frozenStock = { id: 1, is_frozen: true };
+            const frozenStock = { id: 1, is_frozen: true, stock_status: 'saleable' };
             const mockQueryBuilder = {
                 setLock: jest.fn().mockReturnThis(),
                 where: jest.fn().mockReturnThis(),

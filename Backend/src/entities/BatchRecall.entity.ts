@@ -30,6 +30,13 @@ export enum RecallReason {
     OTHER = 'other',
 }
 
+/** Rwanda-style recall classes (regulatory response timelines). */
+export enum RecallClass {
+    CLASS_I = 'class_i',
+    CLASS_II = 'class_ii',
+    CLASS_III = 'class_iii',
+}
+
 @Entity('batch_recalls')
 @Index(['organization_id'])
 export class BatchRecall {
@@ -68,6 +75,15 @@ export class BatchRecall {
 
     @Column({ type: 'text' })
     description!: string;
+
+    @Column({ type: 'enum', enum: RecallClass, nullable: true })
+    recall_class?: RecallClass | null;
+
+    @Column({ type: 'timestamptz', nullable: true })
+    regulatory_due_at?: Date | null;
+
+    @Column({ type: 'text', nullable: true })
+    closure_reconciliation_note?: string | null;
 
     @Column({ type: 'enum', enum: RecallStatus, default: RecallStatus.INITIATED })
     status!: RecallStatus;

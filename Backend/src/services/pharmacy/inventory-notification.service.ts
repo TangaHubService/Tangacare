@@ -1,3 +1,7 @@
+/**
+ * Inventory / recall notifications: in-app notifications plus optional **email (OOB)**.
+ * Delivery outcomes are persisted on `AlertDeliveryLog` for audit (`GET /api/pharmacy/alerts/delivery-logs`).
+ */
 import { AppDataSource } from '../../config/database';
 import { AlertDeliveryChannel, AlertDeliveryLog, AlertDeliveryStatus } from '../../entities/AlertDeliveryLog.entity';
 import { BatchRecall } from '../../entities/BatchRecall.entity';

@@ -1,7 +1,7 @@
 import { Request, Response } from 'express';
 import { StockService } from '../../services/pharmacy/stock.service';
 import { ResponseUtil } from '../../utils/response.util';
-import { StockAdjustmentDto, StockQueryDto } from '../../dto/pharmacy.dto';
+import { StockAdjustmentDto, StockQueryDto, ReleaseStockQcDto } from '../../dto/pharmacy.dto';
 import { AuditService } from '../../services/pharmacy/audit.service';
 import { AuditAction, AuditEntityType } from '../../entities/AuditLog.entity';
 import { StockMovementType } from '../../entities/StockMovement.entity';
@@ -376,6 +376,38 @@ export class StockController {
                 return;
             }
             ResponseUtil.internalError(res, 'Failed to import stock', error.message);
+        }
+    };
+
+    releaseStockFromQc = async (req: Request, res: Response): Promise<void> => {
+        try {
+            const user = (req as any).user;
+            const facilityId = resolveFacilityId(req);
+            const organizationId = user?.organizationId;
+            const userId = user?.userId;
+            if (!facilityId || !organizationId || !userId) {
+                ResponseUtil.forbidden(res, 'Missing authentication or facility context.');
+                return;
+            }
+            const dto = req.body as ReleaseStockQcDto;
+            const stock = await this.stockService.releaseStockFromQc(dto.stock_id, facilityId, organizationId, userId);
+            await this.auditService.log({
+                facility_id: facilityId,
+                user_id: userId,
+                organization_id: organizationId,
+                action: AuditAction.UPDATE,
+                entity_type: AuditEntityType.STOCK,
+                entity_id: stock.id,
+                entity_name: `Stock #${stock.id}`,
+                description: `Stock row ${stock.id} released from pending QC to saleable`,
+            });
+            ResponseUtil.success(res, stock, 'Stock released from QC');
+        } catch (error: any) {
+            if (error?.statusCode) {
+                ResponseUtil.error(res, error.message, error.statusCode);
+                return;
+            }
+            ResponseUtil.internalError(res, 'Failed to release stock from QC', error.message);
         }
     };
 }

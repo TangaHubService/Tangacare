@@ -901,8 +901,11 @@ export class ReportingService {
                         sale_number: sale.sale_number,
                         date: new Date(sale.created_at).toISOString(),
                         medicine_name: item.medicine.name,
+                        drug_schedule: item.medicine.drug_schedule,
                         batch_number: item.batch?.batch_number || 'N/A',
                         quantity: item.quantity,
+                        prescription_id: sale.prescription_id ?? null,
+                        patient_id_number: sale.patient_id_number ?? null,
                         patient_name: sale.patient ? `${sale.patient.first_name} ${sale.patient.last_name}` : null,
                         cashier_name: sale.cashier ? `${sale.cashier.first_name} ${sale.cashier.last_name}` : 'Unknown',
                     });
@@ -2815,6 +2818,79 @@ export class ReportingService {
                 status: po.status,
                 total_amount: Number(po.total_amount || 0),
             })),
+        };
+    }
+
+    /**
+     * Diagnostic: compare `batches.current_quantity` to summed `stocks.quantity` for a facility.
+     * Helps spot drift if any path updated stock without updating the batch aggregate.
+     */
+    async getBatchStockReconciliation(
+        facilityId: number,
+        organizationId?: number,
+    ): Promise<{
+        facility_id: number;
+        organization_id: number | null;
+        generated_at: string;
+        mismatches: Array<{
+            batch_id: number;
+            batch_number: string;
+            medicine_id: number;
+            medicine_name: string;
+            batch_current_quantity: number;
+            stock_rows_sum: number;
+            delta: number;
+        }>;
+        mismatch_count: number;
+    }> {
+        this.requireScope(facilityId, organizationId, 'batch vs stock reconciliation');
+
+        const qb = this.stockRepository
+            .createQueryBuilder('stock')
+            .select('stock.batch_id', 'batch_id')
+            .addSelect('SUM(stock.quantity)', 'stock_sum')
+            .innerJoin('stock.batch', 'batch')
+            .leftJoin('batch.medicine', 'medicine')
+            .addSelect('batch.batch_number', 'batch_number')
+            .addSelect('batch.medicine_id', 'medicine_id')
+            .addSelect('medicine.name', 'medicine_name')
+            .addSelect('batch.current_quantity', 'batch_qty')
+            .where('stock.is_deleted = :isDeleted', { isDeleted: false })
+            .andWhere('stock.facility_id = :facilityId', { facilityId })
+            .groupBy('stock.batch_id')
+            .addGroupBy('batch.batch_number')
+            .addGroupBy('batch.medicine_id')
+            .addGroupBy('medicine.name')
+            .addGroupBy('batch.current_quantity');
+
+        if (organizationId) {
+            qb.andWhere('stock.organization_id = :organizationId', { organizationId });
+        }
+
+        const rows = await qb.getRawMany();
+
+        const mismatches = rows
+            .map((row: any) => {
+                const batchQty = Number(row.batch_qty ?? 0);
+                const stockSum = Number(row.stock_sum ?? 0);
+                return {
+                    batch_id: Number(row.batch_id),
+                    batch_number: String(row.batch_number ?? ''),
+                    medicine_id: Number(row.medicine_id ?? 0),
+                    medicine_name: String(row.medicine_name ?? ''),
+                    batch_current_quantity: batchQty,
+                    stock_rows_sum: stockSum,
+                    delta: batchQty - stockSum,
+                };
+            })
+            .filter((r) => Math.abs(r.delta) > 0);
+
+        return {
+            facility_id: facilityId,
+            organization_id: organizationId ?? null,
+            generated_at: new Date().toISOString(),
+            mismatches,
+            mismatch_count: mismatches.length,
         };
     }
 }

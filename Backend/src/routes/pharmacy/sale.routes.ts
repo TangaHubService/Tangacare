@@ -1,11 +1,11 @@
 import { Router } from 'express';
 import { SaleController } from '../../controllers/pharmacy/sale.controller';
 import { validateDto } from '../../middleware/validation.middleware';
-import { authenticate, authorize } from '../../middleware/auth.middleware';
+import { authenticate, requirePermission } from '../../middleware/auth.middleware';
 import { requireFacilityScope } from '../../middleware/facility-scope.middleware';
 import { scopeMiddleware } from '../../middleware/scope.middleware';
 import { CreateSaleDto } from '../../dto/pharmacy.dto';
-import { UserRole } from '../../entities/User.entity';
+import { PERMISSIONS } from '../../config/permissions';
 
 const router = Router();
 const saleController = new SaleController();
@@ -14,7 +14,7 @@ router.post(
     '/',
     authenticate,
     requireFacilityScope,
-    authorize(UserRole.PHARMACIST, UserRole.FACILITY_ADMIN, UserRole.SUPER_ADMIN),
+    requirePermission(PERMISSIONS.DISPENSING_WRITE),
     scopeMiddleware,
     validateDto(CreateSaleDto),
     saleController.create,
@@ -24,54 +24,51 @@ router.get(
     '/',
     authenticate,
     requireFacilityScope,
-    authorize(UserRole.PHARMACIST, UserRole.FACILITY_ADMIN, UserRole.SUPER_ADMIN, UserRole.AUDITOR),
+    requirePermission(PERMISSIONS.DISPENSING_READ),
     scopeMiddleware,
     saleController.findAll,
+);
+
+/** Static paths must be registered before `/:id` so "printers" is not captured as an id. */
+router.get(
+    '/printers/available',
+    authenticate,
+    requirePermission(PERMISSIONS.DISPENSING_WRITE),
+    saleController.getPrinters,
+);
+
+router.get(
+    '/printers/test',
+    authenticate,
+    requirePermission(PERMISSIONS.DISPENSING_WRITE),
+    saleController.testPrinter,
+);
+
+router.get(
+    '/:id/receipt',
+    authenticate,
+    requireFacilityScope,
+    requirePermission(PERMISSIONS.DISPENSING_READ),
+    scopeMiddleware,
+    saleController.getReceipt,
+);
+
+router.post(
+    '/:id/print',
+    authenticate,
+    requireFacilityScope,
+    requirePermission(PERMISSIONS.DISPENSING_WRITE),
+    scopeMiddleware,
+    saleController.printInvoice,
 );
 
 router.get(
     '/:id',
     authenticate,
     requireFacilityScope,
-    authorize(UserRole.PHARMACIST, UserRole.FACILITY_ADMIN, UserRole.SUPER_ADMIN, UserRole.AUDITOR),
+    requirePermission(PERMISSIONS.DISPENSING_READ),
     scopeMiddleware,
     saleController.findOne,
-);
-
-// H-1: PDF Receipt endpoint
-router.get(
-    '/:id/receipt',
-    authenticate,
-    requireFacilityScope,
-    authorize(UserRole.PHARMACIST, UserRole.FACILITY_ADMIN, UserRole.SUPER_ADMIN, UserRole.AUDITOR),
-    scopeMiddleware,
-    saleController.getReceipt,
-);
-
-// Print invoice directly to printer
-router.post(
-    '/:id/print',
-    authenticate,
-    requireFacilityScope,
-    authorize(UserRole.PHARMACIST, UserRole.FACILITY_ADMIN, UserRole.SUPER_ADMIN),
-    scopeMiddleware,
-    saleController.printInvoice,
-);
-
-// Get available printers
-router.get(
-    '/printers/available',
-    authenticate,
-    authorize(UserRole.PHARMACIST, UserRole.FACILITY_ADMIN, UserRole.SUPER_ADMIN),
-    saleController.getPrinters,
-);
-
-// Test printer availability
-router.get(
-    '/printers/test',
-    authenticate,
-    authorize(UserRole.PHARMACIST, UserRole.FACILITY_ADMIN, UserRole.SUPER_ADMIN),
-    saleController.testPrinter,
 );
 
 export default router;

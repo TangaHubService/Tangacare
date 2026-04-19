@@ -15,6 +15,8 @@ import { BatchService } from './batch.service';
 import { Batch } from '../../entities/Batch.entity';
 import { Medicine } from '../../entities/Medicine.entity';
 import { Facility } from '../../entities/Facility.entity';
+import { Supplier, SupplierQualificationStatus } from '../../entities/Supplier.entity';
+import { StockStatus } from '../../entities/Stock.entity';
 import {
     CreatePurchaseOrderDto,
     UpdatePurchaseOrderDto,
@@ -246,6 +248,31 @@ export class ProcurementService {
             await queryRunner.startTransaction();
 
             try {
+                const supplierCheck = await queryRunner.manager.findOne(Supplier, {
+                    where: { id: createDto.supplier_id, organization_id: createDto.organization_id },
+                });
+                if (!supplierCheck) {
+                    throw new AppError('Supplier not found for this organization', 404);
+                }
+                if (supplierCheck.qualification_status === SupplierQualificationStatus.SUSPENDED) {
+                    throw new AppError('Supplier is suspended and cannot be used on purchase orders', 400);
+                }
+                const settingsServiceEarly = new SettingsService(queryRunner.manager);
+                const supplierCtx = {
+                    tenantId: createDto.organization_id!,
+                    branchId: createDto.facility_id!,
+                    userId: createdById,
+                };
+                const requireQualifiedSupplier = await settingsServiceEarly
+                    .getEffectiveValue<boolean>(SETTINGS_KEYS.SUPPLIER_REQUIRE_QUALIFIED_FOR_PO, supplierCtx)
+                    .catch(() => false);
+                if (
+                    requireQualifiedSupplier &&
+                    supplierCheck.qualification_status !== SupplierQualificationStatus.QUALIFIED
+                ) {
+                    throw new AppError('Supplier must be qualified before creating a purchase order', 400);
+                }
+
                 const orderNumber = await this.generateOrderNumber(createDto.facility_id!);
 
                 const { items: _, ...orderData } = createDto;
@@ -386,7 +413,7 @@ export class ProcurementService {
         receivedById: number,
         organizationId: number,
         facilityId?: number,
-    ): Promise<{ order: PurchaseOrder; skippedItems: any[] }> {
+    ): Promise<{ order: PurchaseOrder; skippedItems: any[]; goods_receipt?: GoodsReceipt | null }> {
         if (!receiveDto.received_items?.length) {
             throw new AppError('At least one receipt line is required', 400);
         }
@@ -422,6 +449,10 @@ export class ProcurementService {
                 throw new AppError('Cannot receive a cancelled order', 400);
             }
 
+            if (purchaseOrder.supplier?.qualification_status === SupplierQualificationStatus.SUSPENDED) {
+                throw new AppError('Cannot receive against a suspended supplier', 400);
+            }
+
             if (!ProcurementService.RECEIVABLE_STATUSES.includes(purchaseOrder.status)) {
                 throw new AppError(
                     `Cannot receive an order in ${purchaseOrder.status} status. Approve/confirm it first.`,
@@ -440,16 +471,8 @@ export class ProcurementService {
             const orderDiscount = Math.min(Math.max(purchaseOrder.discount_amount || 0, 0), orderSubtotal);
             const orderVatRate = purchaseOrder.vat_rate || 0;
 
-            const goodsReceipt = queryRunner.manager.create(GoodsReceipt, {
-                receipt_number: generateDocumentNumber('GR'),
-                facility_id: purchaseOrder.facility_id,
-                organization_id: purchaseOrder.organization_id,
-                purchase_order_id: purchaseOrder.id,
-                received_by_id: receivedById,
-                received_date: receiveDto.received_date ? new Date(receiveDto.received_date) : new Date(),
-                notes: receiveDto.notes,
-                items: [],
-            });
+            /** Persisted on first physical receipt line so stock movements can reference GOODS_RECEIPT (append-only ledger). */
+            let savedGr: GoodsReceipt | null = null;
 
             const currentGRItems: GoodsReceiptItem[] = [];
 
@@ -587,6 +610,35 @@ export class ProcurementService {
                     const baseUnitCost = UomService.toBaseUnitCost(effectiveUnitCost, medicine!);
                     const baseSellingPrice = UomService.toBaseUnitCost(sellingPrice, medicine!);
 
+                    const varianceQty =
+                        receivedItem.variance_quantity !== undefined && receivedItem.variance_quantity !== null
+                            ? Number(receivedItem.variance_quantity)
+                            : null;
+                    const lineFailsQc = receivedItem.qc_pass === false;
+                    const forceQuarantine = Boolean(receivedItem.receive_into_quarantine);
+                    const hasVariance = varianceQty !== null && !Number.isNaN(varianceQty) && varianceQty !== 0;
+                    const receiptLineStatus =
+                        lineFailsQc || forceQuarantine || hasVariance ? StockStatus.QUARANTINE : StockStatus.SALEABLE;
+
+                    if (!savedGr) {
+                        savedGr = await queryRunner.manager.save(
+                            queryRunner.manager.create(GoodsReceipt, {
+                                receipt_number: generateDocumentNumber('GR'),
+                                facility_id: purchaseOrder.facility_id,
+                                organization_id: purchaseOrder.organization_id,
+                                purchase_order_id: purchaseOrder.id,
+                                received_by_id: receivedById,
+                                received_date: receiveDto.received_date
+                                    ? new Date(receiveDto.received_date)
+                                    : new Date(),
+                                notes: receiveDto.notes,
+                                storage_condition_note: receiveDto.storage_condition_note ?? null,
+                                qc_pass: typeof receiveDto.qc_pass === 'boolean' ? receiveDto.qc_pass : null,
+                                coa_attachment_url: receiveDto.coa_attachment_url ?? null,
+                            }),
+                        );
+                    }
+
                     if (medicine && Number(medicine.selling_price || 0) < baseSellingPrice) {
                         medicine.selling_price = Number(baseSellingPrice.toFixed(2));
                         await queryRunner.manager.save(medicine);
@@ -633,15 +685,22 @@ export class ProcurementService {
                         baseSellingPrice,
                         {
                             type: StockMovementType.IN,
-                            reference_type: 'PURCHASE_ORDER',
-                            reference_id: purchaseOrder.id,
+                            reference_type: 'GOODS_RECEIPT',
+                            reference_id: savedGr!.id,
                             user_id: receivedById,
-                            notes: `Received via GR ${goodsReceipt.receipt_number} (PO ${purchaseOrder.order_number})${targetBatch ? ' into existing batch' : ''}. Converted from ${qtyReceivedThisTime} packages.`,
+                            notes: `GR ${savedGr!.receipt_number} · PO ${purchaseOrder.order_number}${targetBatch ? ' · existing batch' : ''} · ${qtyReceivedThisTime} pkg → ${baseQty} base units`,
+                            initial_stock_status: receiptLineStatus,
                         },
                     );
 
+                    orderItem.last_receipt_qc_pass =
+                        typeof receivedItem.qc_pass === 'boolean' ? receivedItem.qc_pass : null;
+                    orderItem.last_receipt_variance_qty = hasVariance ? varianceQty : null;
+                    await queryRunner.manager.save(orderItem);
+
                     currentGRItems.push(
                         queryRunner.manager.create(GoodsReceiptItem, {
+                            goods_receipt_id: savedGr!.id,
                             purchase_order_item_id: orderItem.id,
                             medicine_id: orderItem.medicine_id,
                             batch_id: batch.id,
@@ -649,6 +708,9 @@ export class ProcurementService {
                             unit_cost: effectiveUnitCost,
                             batch_number: receivedItem.batch_number,
                             expiry_date: receivedItem.expiry_date ? new Date(receivedItem.expiry_date) : undefined,
+                            qc_pass: typeof receivedItem.qc_pass === 'boolean' ? receivedItem.qc_pass : null,
+                            variance_quantity: varianceQty,
+                            storage_condition_note: receivedItem.storage_condition_note ?? null,
                         }),
                     );
                 }
@@ -658,10 +720,9 @@ export class ProcurementService {
                 throw new AppError('No received or backordered quantities were provided', 400);
             }
 
-            // Save Goods Receipt
-            if (currentGRItems.length > 0) {
-                goodsReceipt.items = currentGRItems;
-                await queryRunner.manager.save(goodsReceipt);
+            if (currentGRItems.length > 0 && savedGr) {
+                await queryRunner.manager.save(currentGRItems);
+                purchaseOrder.last_goods_receipt_id = savedGr.id;
             }
 
             allItemsReceived = purchaseOrder.items.every(
@@ -694,6 +755,19 @@ export class ProcurementService {
                 description: `Purchase order ${updatedOrder.order_number} received`,
             });
 
+            if (savedGr && currentGRItems.length > 0) {
+                await transactionalAuditService.log({
+                    facility_id: purchaseOrder.facility_id,
+                    user_id: receivedById,
+                    organization_id: purchaseOrder.organization_id,
+                    action: AuditAction.RECEIVE,
+                    entity_type: AuditEntityType.GOODS_RECEIPT,
+                    entity_id: savedGr.id,
+                    entity_name: savedGr.receipt_number,
+                    description: `Goods receipt ${savedGr.receipt_number} posted for PO ${updatedOrder.order_number} (${currentGRItems.length} line(s))`,
+                });
+            }
+
             await queryRunner.commitTransaction();
 
             // Side-effects after commit (non-critical; failure won't corrupt data)
@@ -706,7 +780,7 @@ export class ProcurementService {
                 { order_id: updatedOrder.id },
             );
 
-            return { order: updatedOrder, skippedItems };
+            return { order: updatedOrder, skippedItems, goods_receipt: savedGr };
         } catch (error) {
             if (queryRunner.isTransactionActive) {
                 await queryRunner.rollbackTransaction();

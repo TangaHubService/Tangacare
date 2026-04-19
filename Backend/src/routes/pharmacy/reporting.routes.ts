@@ -1,7 +1,8 @@
 import { Router } from 'express';
 import { ReportingController } from '../../controllers/pharmacy/reporting.controller';
 import { ReportExportJobController } from '../../controllers/pharmacy/report-export-job.controller';
-import { authenticate, authorize } from '../../middleware/auth.middleware';
+import { authenticate, authorize, requirePermission } from '../../middleware/auth.middleware';
+import { PERMISSIONS } from '../../config/permissions';
 import { requireFacilityScope } from '../../middleware/facility-scope.middleware';
 import { scopeMiddleware } from '../../middleware/scope.middleware';
 import { UserRole } from '../../entities/User.entity';
@@ -15,6 +16,15 @@ router.get('/sales-summary/:facilityId?', authenticate, scopeMiddleware, reporti
 router.get('/low-stock/:facilityId?', authenticate, scopeMiddleware, reportingController.getLowStock);
 
 router.get('/expiry/:facilityId?', authenticate, scopeMiddleware, reportingController.getExpiryReport);
+
+router.get(
+    '/batch-stock-reconciliation/:facilityId?',
+    authenticate,
+    requireFacilityScope,
+    requirePermission(PERMISSIONS.INVENTORY_READ, PERMISSIONS.REPORTS_READ),
+    scopeMiddleware,
+    reportingController.getBatchStockReconciliation,
+);
 
 router.get('/daily-cash/:facilityId?', authenticate, scopeMiddleware, reportingController.getDailyCash);
 
@@ -31,6 +41,21 @@ router.get(
     ),
     scopeMiddleware,
     reportingController.getControlledDrugsPeriodReport,
+);
+
+router.get(
+    '/controlled-medicine-register/export',
+    authenticate,
+    requireFacilityScope,
+    authorize(
+        UserRole.FACILITY_ADMIN,
+        UserRole.SUPER_ADMIN,
+        UserRole.AUDITOR,
+        UserRole.PHARMACIST,
+        UserRole.STORE_MANAGER,
+    ),
+    scopeMiddleware,
+    reportingController.exportControlledMedicineRegisterCsv,
 );
 
 router.get('/stock-register/:facilityId?', authenticate, scopeMiddleware, reportingController.getStockRegister);

@@ -14,6 +14,12 @@ import { PurchaseOrder } from './PurchaseOrder.entity';
 import { Facility } from './Facility.entity';
 import { Organization } from './Organization.entity';
 
+export enum SupplierQualificationStatus {
+    QUALIFIED = 'qualified',
+    PENDING = 'pending',
+    SUSPENDED = 'suspended',
+}
+
 @Entity('suppliers')
 @Index(['organization_id', 'facility_id'])
 export class Supplier {
@@ -55,6 +61,19 @@ export class Supplier {
 
     @Column({ type: 'boolean', default: true })
     is_active: boolean;
+
+    @Column({
+        type: 'enum',
+        enum: SupplierQualificationStatus,
+        default: SupplierQualificationStatus.QUALIFIED,
+    })
+    qualification_status: SupplierQualificationStatus;
+
+    @Column({ type: 'date', nullable: true })
+    qualification_expires_at: Date | null;
+
+    @Column({ type: 'varchar', length: 512, nullable: true })
+    licence_document_url: string | null;
 
     @CreateDateColumn({ type: 'timestamp with time zone' })
     created_at: Date;

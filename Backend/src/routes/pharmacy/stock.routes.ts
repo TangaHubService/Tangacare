@@ -1,10 +1,11 @@
 import { Router } from 'express';
 import { StockController } from '../../controllers/pharmacy/stock.controller';
-import { authenticate, authorize } from '../../middleware/auth.middleware';
+import { authenticate, authorize, requirePermission } from '../../middleware/auth.middleware';
+import { PERMISSIONS } from '../../config/permissions';
 import { requireFacilityScope } from '../../middleware/facility-scope.middleware';
 import { scopeMiddleware } from '../../middleware/scope.middleware';
 import { validateDto } from '../../middleware/validation.middleware';
-import { StockAdjustmentDto } from '../../dto/pharmacy.dto';
+import { StockAdjustmentDto, ReleaseStockQcDto } from '../../dto/pharmacy.dto';
 import { UserRole } from '../../entities/User.entity';
 import multer from 'multer';
 
@@ -13,6 +14,16 @@ const stockController = new StockController();
 const upload = multer({ storage: multer.memoryStorage() });
 
 router.get('/', authenticate, requireFacilityScope, scopeMiddleware, stockController.getStock);
+
+router.post(
+    '/release-qc',
+    authenticate,
+    requireFacilityScope,
+    requirePermission(PERMISSIONS.INVENTORY_WRITE),
+    scopeMiddleware,
+    validateDto(ReleaseStockQcDto),
+    stockController.releaseStockFromQc,
+);
 
 router.post(
     '/adjust',

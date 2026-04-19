@@ -151,6 +151,10 @@ export class PurchaseOrder {
     @Column({ type: 'timestamp with time zone', nullable: true })
     token_expires_at: Date;
 
+    /** Latest posted goods receipt for this PO (receiving traceability). */
+    @Column({ type: 'int', nullable: true })
+    last_goods_receipt_id: number | null;
+
     @Column({ type: 'boolean', default: false })
     is_viewed_by_supplier: boolean;
 
@@ -220,6 +224,13 @@ export class PurchaseOrderItem {
 
     @Column({ type: 'text', nullable: true })
     notes: string;
+
+    /** Snapshot from the most recent physical receipt line (QC / variance). */
+    @Column({ type: 'boolean', nullable: true })
+    last_receipt_qc_pass: boolean | null;
+
+    @Column({ type: 'int', nullable: true })
+    last_receipt_variance_qty: number | null;
 
     @CreateDateColumn({ type: 'timestamp with time zone' })
     created_at: Date;

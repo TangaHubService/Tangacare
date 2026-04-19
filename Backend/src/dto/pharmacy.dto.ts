@@ -30,6 +30,8 @@ import { ColdChainTelemetrySource } from '../entities/ColdChainTelemetry.entity'
 import { VendorReturnReason } from '../entities/VendorReturn.entity';
 import { DisposalStatus, DisposalType, DisposalReason } from '../entities/DisposalRequest.entity';
 import { ItemCondition, RefundMethod, ReturnReason, ReturnStatus } from '../entities/CustomerReturn.entity';
+import { QualityCaseType, QualityCaseStatus } from '../entities/QualityCase.entity';
+import { SupplierQualificationStatus } from '../entities/Supplier.entity';
 
 export class CreateStorageLocationDto {
     @IsInt()
@@ -918,6 +920,19 @@ export class CreateSupplierDto {
     @IsString()
     @IsOptional()
     notes?: string;
+
+    @IsEnum(SupplierQualificationStatus)
+    @IsOptional()
+    qualification_status?: SupplierQualificationStatus;
+
+    @IsDateString()
+    @IsOptional()
+    qualification_expires_at?: string;
+
+    @IsString()
+    @IsOptional()
+    @MaxLength(512)
+    licence_document_url?: string;
 }
 
 export class UpdateSupplierDto {
@@ -975,6 +990,19 @@ export class UpdateSupplierDto {
     @IsBoolean()
     @IsOptional()
     is_active?: boolean;
+
+    @IsEnum(SupplierQualificationStatus)
+    @IsOptional()
+    qualification_status?: SupplierQualificationStatus;
+
+    @IsDateString()
+    @IsOptional()
+    qualification_expires_at?: string;
+
+    @IsString()
+    @IsOptional()
+    @MaxLength(512)
+    licence_document_url?: string;
 }
 
 export class PurchaseOrderItemDto {
@@ -1119,6 +1147,18 @@ export class ReceivePurchaseOrderDto {
     @IsString()
     @IsOptional()
     notes?: string;
+
+    @IsString()
+    @IsOptional()
+    storage_condition_note?: string;
+
+    @IsBoolean()
+    @IsOptional()
+    qc_pass?: boolean;
+
+    @IsString()
+    @IsOptional()
+    coa_attachment_url?: string;
 }
 
 export class ReceivedItemDto {
@@ -1154,6 +1194,22 @@ export class ReceivedItemDto {
     @IsInt()
     @IsOptional() // Will enforce in service logic if needed, but allow optional for backward compatibility if legacy UI doesn't send it initially
     location_id?: number;
+
+    @IsBoolean()
+    @IsOptional()
+    qc_pass?: boolean;
+
+    @IsInt()
+    @IsOptional()
+    variance_quantity?: number;
+
+    @IsString()
+    @IsOptional()
+    storage_condition_note?: string;
+
+    @IsBoolean()
+    @IsOptional()
+    receive_into_quarantine?: boolean;
 }
 
 export class CreateVendorReturnItemDto {
@@ -1839,4 +1895,83 @@ export class DisposalFiltersDto {
     @IsOptional()
     @Min(1)
     limit?: number;
+}
+
+export class CreateWalkInPrescriptionDto {
+    @IsInt()
+    facility_id: number;
+
+    @IsInt()
+    organization_id: number;
+
+    @IsString()
+    @MinLength(3)
+    prescription_text: string;
+
+    @IsString()
+    @IsOptional()
+    diagnosis?: string;
+
+    @IsString()
+    @IsOptional()
+    walk_in_patient_name?: string;
+
+    @IsString()
+    @IsOptional()
+    walk_in_patient_identifier?: string;
+
+    @IsString()
+    @IsOptional()
+    external_prescriber_name?: string;
+
+    @IsString()
+    @IsOptional()
+    external_prescriber_license?: string;
+
+    @IsInt()
+    @IsOptional()
+    validity_days?: number;
+}
+
+export class CreateQualityCaseDto {
+    @IsInt()
+    facility_id: number;
+
+    @IsEnum(QualityCaseType)
+    type: QualityCaseType;
+
+    @IsString()
+    @MinLength(3)
+    title: string;
+
+    @IsString()
+    @MinLength(3)
+    description: string;
+
+    @IsInt()
+    @IsOptional()
+    medicine_id?: number;
+
+    @IsInt()
+    @IsOptional()
+    batch_id?: number;
+
+    @IsString()
+    @IsOptional()
+    capa_actions?: string;
+}
+
+export class UpdateQualityCaseDto {
+    @IsEnum(QualityCaseStatus)
+    @IsOptional()
+    status?: QualityCaseStatus;
+
+    @IsString()
+    @IsOptional()
+    capa_actions?: string;
+}
+
+export class ReleaseStockQcDto {
+    @IsInt()
+    stock_id: number;
 }

@@ -6,6 +6,7 @@ import { PurchaseOrder, PurchaseOrderStatus, PurchaseOrderItemStatus } from '../
 import { Batch } from '../../../entities/Batch.entity';
 import { Medicine } from '../../../entities/Medicine.entity';
 import { Facility } from '../../../entities/Facility.entity';
+import { Supplier, SupplierQualificationStatus } from '../../../entities/Supplier.entity';
 
 // Define mock instances at the top Level (hoisted with jest.mock)
 const mockStockServiceInstance = {
@@ -178,6 +179,7 @@ describe('ProcurementService', () => {
     describe('create', () => {
         const createDto: CreatePurchaseOrderDto = {
             facility_id: 1,
+            organization_id: 1,
             supplier_id: 1,
             items: [
                 {
@@ -189,6 +191,16 @@ describe('ProcurementService', () => {
         };
 
         it('should create purchase order successfully', async () => {
+            mockQueryRunner.manager.findOne.mockImplementation((entity: any) => {
+                if (entity === Supplier) {
+                    return Promise.resolve({
+                        id: 1,
+                        organization_id: 1,
+                        qualification_status: SupplierQualificationStatus.QUALIFIED,
+                    });
+                }
+                return Promise.resolve(null);
+            });
             mockMedicineRepository.findOne.mockResolvedValue({ id: 1, name: 'Paracetamol' });
 
             const savedPO = {
@@ -266,7 +278,18 @@ describe('ProcurementService', () => {
                 quantity: 100,
             });
 
-            mockQueryRunner.manager.save.mockImplementation((entity: any) => Promise.resolve(entity));
+            let nextGrId = 900;
+            mockQueryRunner.manager.save.mockImplementation((entity: any) => {
+                if (
+                    entity &&
+                    !Array.isArray(entity) &&
+                    typeof entity.receipt_number === 'string' &&
+                    String(entity.receipt_number).startsWith('GR')
+                ) {
+                    if (!entity.id) entity.id = nextGrId++;
+                }
+                return Promise.resolve(entity);
+            });
 
             const receiveDto = {
                 received_items: [
@@ -334,7 +357,18 @@ describe('ProcurementService', () => {
             };
 
             mockBatchServiceInstance.create.mockResolvedValue({ id: 10 });
-            mockQueryRunner.manager.save.mockImplementation((entity: any) => Promise.resolve(entity));
+            let nextGrId = 900;
+            mockQueryRunner.manager.save.mockImplementation((entity: any) => {
+                if (
+                    entity &&
+                    !Array.isArray(entity) &&
+                    typeof entity.receipt_number === 'string' &&
+                    String(entity.receipt_number).startsWith('GR')
+                ) {
+                    if (!entity.id) entity.id = nextGrId++;
+                }
+                return Promise.resolve(entity);
+            });
 
             const result = await procurementService.receiveOrder(1, receiveDto, 1, 1);
 
@@ -394,7 +428,18 @@ describe('ProcurementService', () => {
                 quantity: 30,
             });
             mockBatchServiceInstance.increaseQuantity.mockResolvedValue({ ...existingBatch, current_quantity: 30 });
-            mockQueryRunner.manager.save.mockImplementation((entity: any) => Promise.resolve(entity));
+            let nextGrId = 900;
+            mockQueryRunner.manager.save.mockImplementation((entity: any) => {
+                if (
+                    entity &&
+                    !Array.isArray(entity) &&
+                    typeof entity.receipt_number === 'string' &&
+                    String(entity.receipt_number).startsWith('GR')
+                ) {
+                    if (!entity.id) entity.id = nextGrId++;
+                }
+                return Promise.resolve(entity);
+            });
 
             const receiveDto = {
                 received_items: [
@@ -424,7 +469,8 @@ describe('ProcurementService', () => {
                 expect.any(Number),
                 expect.objectContaining({
                     type: 'in',
-                    reference_type: 'PURCHASE_ORDER',
+                    reference_type: 'GOODS_RECEIPT',
+                    reference_id: expect.any(Number),
                 }),
             );
             expect(result.order.items[0].quantity_received).toBe(30);
@@ -474,7 +520,18 @@ describe('ProcurementService', () => {
             };
 
             mockBatchServiceInstance.create.mockResolvedValue({ id: 11 });
-            mockQueryRunner.manager.save.mockImplementation((entity: any) => Promise.resolve(entity));
+            let nextGrId = 900;
+            mockQueryRunner.manager.save.mockImplementation((entity: any) => {
+                if (
+                    entity &&
+                    !Array.isArray(entity) &&
+                    typeof entity.receipt_number === 'string' &&
+                    String(entity.receipt_number).startsWith('GR')
+                ) {
+                    if (!entity.id) entity.id = nextGrId++;
+                }
+                return Promise.resolve(entity);
+            });
 
             const result = await procurementService.receiveOrder(1, receiveDto, 1, 1);
 

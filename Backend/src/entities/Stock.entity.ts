@@ -18,6 +18,14 @@ import { User } from './User.entity';
 import { StorageLocation } from './StorageLocation.entity';
 import { Organization } from './Organization.entity';
 
+/** Regulated stock disposition for sale, segregation, and QC workflows. */
+export enum StockStatus {
+    SALEABLE = 'saleable',
+    QUARANTINE = 'quarantine',
+    NON_SALEABLE = 'non_saleable',
+    PENDING_QC = 'pending_qc',
+}
+
 @Entity('stocks')
 @Index(['facility_id', 'medicine_id', 'batch_id', 'department_id', 'location_id'], { unique: true })
 @Index(['organization_id'])
@@ -57,6 +65,13 @@ export class Stock {
 
     @Column({ type: 'boolean', default: false })
     is_frozen: boolean;
+
+    @Column({
+        type: 'enum',
+        enum: StockStatus,
+        default: StockStatus.SALEABLE,
+    })
+    stock_status: StockStatus;
 
     @Column({ type: 'boolean', default: false })
     is_deleted: boolean;

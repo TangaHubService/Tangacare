@@ -1,9 +1,10 @@
 import { Repository } from 'typeorm';
 import { AppDataSource } from '../../config/database';
-import { BatchRecall, RecallStatus, RecallReason } from '../../entities/BatchRecall.entity';
+import { BatchRecall, RecallStatus, RecallReason, RecallClass } from '../../entities/BatchRecall.entity';
 import { SaleStatus } from '../../entities/Sale.entity';
 import { SaleItem } from '../../entities/Sale.entity';
-import { Stock } from '../../entities/Stock.entity';
+import { Stock, StockStatus } from '../../entities/Stock.entity';
+import { computeRecallRegulatoryDueAt } from '../../utils/regulatory-recall.util';
 import { InventoryNotificationService } from './inventory-notification.service';
 import { AlertType } from '../../entities/Alert.entity';
 import { AlertService } from './alert.service';
@@ -16,6 +17,7 @@ export interface InitiateRecallDto {
     reason: RecallReason;
     description: string;
     initiated_by_id: number;
+    recall_class?: RecallClass;
 }
 
 export interface RecallSummary {
@@ -80,13 +82,16 @@ export class RecallService {
             await this.stockRepository
                 .createQueryBuilder()
                 .update(Stock)
-                .set({ is_frozen: true })
+                .set({ stock_status: StockStatus.QUARANTINE })
                 .where('facility_id = :facilityId', { facilityId: data.facility_id })
                 .andWhere('organization_id = :organizationId', { organizationId: data.organization_id })
                 .andWhere('batch_id = :batchId', { batchId: data.batch_id })
                 .andWhere('is_deleted = :isDeleted', { isDeleted: false })
                 .execute();
         }
+
+        const initiatedAt = new Date();
+        const regulatoryDue = computeRecallRegulatoryDueAt(initiatedAt, data.recall_class ?? null);
 
         // Create recall record
         const recall = this.recallRepository.create({
@@ -97,13 +102,15 @@ export class RecallService {
             recall_number: recallNumber,
             reason: data.reason,
             description: data.description,
+            recall_class: data.recall_class ?? null,
+            regulatory_due_at: regulatoryDue ?? undefined,
             status: RecallStatus.INITIATED,
             affected_sales_count: affectedSalesCount,
             affected_quantity: affectedQuantity,
             recovered_quantity: 0,
             remaining_stock: remainingStock,
             initiated_by_id: data.initiated_by_id,
-            initiated_at: new Date(),
+            initiated_at: initiatedAt,
         });
 
         const saved = await this.recallRepository.save(recall);
@@ -200,12 +207,21 @@ export class RecallService {
             recall.completed_at = new Date();
         }
 
-        // Keep recalled stock frozen until recall is cancelled/completed.
-        if (status === RecallStatus.COMPLETED || status === RecallStatus.CANCELLED) {
+        if (status === RecallStatus.COMPLETED) {
             await this.stockRepository
                 .createQueryBuilder()
                 .update(Stock)
-                .set({ is_frozen: false })
+                .set({ stock_status: StockStatus.NON_SALEABLE })
+                .where('facility_id = :facilityId', { facilityId: recall.facility_id })
+                .andWhere('organization_id = :organizationId', { organizationId })
+                .andWhere('batch_id = :batchId', { batchId: recall.batch_id })
+                .andWhere('is_deleted = :isDeleted', { isDeleted: false })
+                .execute();
+        } else if (status === RecallStatus.CANCELLED) {
+            await this.stockRepository
+                .createQueryBuilder()
+                .update(Stock)
+                .set({ stock_status: StockStatus.SALEABLE })
                 .where('facility_id = :facilityId', { facilityId: recall.facility_id })
                 .andWhere('organization_id = :organizationId', { organizationId })
                 .andWhere('batch_id = :batchId', { batchId: recall.batch_id })
@@ -215,7 +231,7 @@ export class RecallService {
             await this.stockRepository
                 .createQueryBuilder()
                 .update(Stock)
-                .set({ is_frozen: true })
+                .set({ stock_status: StockStatus.QUARANTINE })
                 .where('facility_id = :facilityId', { facilityId: recall.facility_id })
                 .andWhere('organization_id = :organizationId', { organizationId })
                 .andWhere('batch_id = :batchId', { batchId: recall.batch_id })

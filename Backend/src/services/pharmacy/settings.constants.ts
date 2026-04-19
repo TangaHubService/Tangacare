@@ -36,6 +36,12 @@ export const SETTINGS_KEYS = {
     CONTROLLED_REQUIRE_DUAL_APPROVAL: 'controlled_medicines.require_dual_approval',
     CONTROLLED_STRICT_SCHEDULE_ENFORCEMENT: 'controlled_medicines.strict_schedule_enforcement',
 
+    /** When true, medicines with drug_schedule prescription_only require prescription_id on sale. */
+    RX_SCHEDULE_ENFORCEMENT_ENABLED: 'compliance.rx_schedule_enforcement_enabled',
+
+    /** When true, block PO creation against suppliers not in qualified status. */
+    SUPPLIER_REQUIRE_QUALIFIED_FOR_PO: 'procurement.supplier_require_qualified_for_po',
+
     REPORTING_DEFAULT_EXPORT_FORMAT: 'reporting.default_export_format',
     REPORTING_RETENTION_DAYS: 'reporting.retention_days',
 
