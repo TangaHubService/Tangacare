@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { Search, ShoppingCart, Trash2, CheckCircle2, User, ChevronDown, ChevronUp, X, Download, ArrowLeft, Mail } from 'lucide-react';
 import { ProtectedRoute } from '../../components/auth/ProtectedRoute';
+import { PERMISSIONS } from '../../types/auth';
 import { pharmacyService } from '../../services/pharmacy.service';
 import type { Medicine, Batch, Stock } from '../../types/pharmacy';
 import { useAuth } from '../../context/AuthContext';
@@ -20,6 +21,8 @@ import { useBarcodeScanner } from '../../hooks/useBarcodeScanner';
 import { useRuntimeConfig } from '../../context/RuntimeConfigContext';
 import { cn } from '../../lib/utils';
 import { formatLocalDate, parseLocalDate } from '../../lib/date';
+import { formatPharmacyApiError } from '../../lib/pharmacyApiErrors';
+import { queryClient } from '../../lib/query-client';
 
 const WALK_IN_PATIENT = {
     id: null,
@@ -48,7 +51,7 @@ interface SuccessSummary {
 }
 
 export function DispensingPage() {
-    const { user, currentFacility } = useAuth();
+    const { user, currentFacility, can } = useAuth();
     const { isOnline, queueCount } = useOfflineSync();
     const [medicines, setMedicines] = useState<Medicine[]>([]);
     const [loading, setLoading] = useState(true);
@@ -122,17 +125,11 @@ export function DispensingPage() {
 
     const { formatMoney, vatRate } = useRuntimeConfig();
 
-    const isReadOnly = user?.role?.toString()?.toLowerCase() === 'auditor';
+    /** Read-only when the user lacks `dispensing:write` (e.g. doctor, auditor) — matches API rules. */
+    const isReadOnly = !can(PERMISSIONS.DISPENSING_WRITE);
     const hasControlledDrug = cart.some((item) => item.is_controlled_drug);
 
-    const getApiErrorMessage = (error: any): string => {
-        return (
-            error?.response?.data?.message ||
-            error?.response?.data?.error ||
-            error?.message ||
-            'Checkout failed. Please try again.'
-        );
-    };
+    const getApiErrorMessage = (error: unknown): string => formatPharmacyApiError(error);
 
     const getAvailableQuantity = (
         stock: Stock & { reserved_quantity?: number; is_frozen?: boolean },
@@ -569,6 +566,13 @@ export function DispensingPage() {
     const cartTotalQuantity = cart.reduce((sum, item) => sum + item.quantity, 0);
 
     const handleCheckout = () => {
+        if (isReadOnly) {
+            toast.error(
+                'Your account can view the catalog but cannot complete checkout. Use a cashier, technician, or pharmacist account.',
+                { duration: 6000 },
+            );
+            return;
+        }
         if (!user?.facility_id) {
             toast.error('No facility selected for your account');
             return;
@@ -627,6 +631,11 @@ export function DispensingPage() {
 
         try {
             if (!isOnline) {
+                if (isReadOnly) {
+                    toast.error('Offline checkout requires dispensing permission.');
+                    setProcessing(false);
+                    return;
+                }
                 const offlineId = `off_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
                 await db.saleQueue.add({
                     ...saleData,
@@ -652,6 +661,13 @@ export function DispensingPage() {
 
             const { sale, warnings } = await pharmacyService.createSale(saleData);
 
+            void queryClient.invalidateQueries({ queryKey: ['operations-today-dashboard'] });
+            void queryClient.invalidateQueries({ queryKey: ['operations-today-alerts'] });
+            void queryClient.invalidateQueries({ queryKey: ['operations-today-alert-summary'] });
+            void queryClient.invalidateQueries({ queryKey: ['comprehensive-kpis'] });
+            void queryClient.invalidateQueries({ queryKey: ['dashboard-owner-panels'] });
+            void queryClient.invalidateQueries({ queryKey: ['dashboard-owner-kpis'] });
+
             setSuccessSummary({
                 amount: total,
                 saleId: sale.id,
@@ -673,7 +689,12 @@ export function DispensingPage() {
             console.error('Checkout failed:', error);
             const message = getApiErrorMessage(error);
             toast.error(message, {
-                duration: message.toLowerCase().includes('fefo') ? 7000 : 4000,
+                duration:
+                    message.toLowerCase().includes('fefo') ||
+                    message.toLowerCase().includes('permission') ||
+                    message.toLowerCase().includes('frozen')
+                        ? 7000
+                        : 4000,
             });
         } finally {
             setProcessing(false);
@@ -682,16 +703,18 @@ export function DispensingPage() {
 
     return (
         <ProtectedRoute
-            allowedRoles={[
-                'admin',
-                'pharmacist',
-                'super_admin',
-                'facility_admin',
-                'auditor',
-                'owner',
-            ]}
+            requiredPermissions={[PERMISSIONS.DISPENSING_READ, PERMISSIONS.DISPENSING_WRITE]}
             requireFacility
         >
+            {isReadOnly && (
+                <div className="bg-sky-600 text-white px-4 py-2 text-xs font-bold flex flex-wrap items-center gap-2 justify-between">
+                    <span>
+                        View-only: you can search and build a cart to help a patient, but checkout requires{' '}
+                        <code className="bg-white/15 px-1 rounded">dispensing:write</code> (cashier, technician,
+                        pharmacist, etc.).
+                    </span>
+                </div>
+            )}
             {!isOnline && (
                 <div className="bg-amber-500 text-white px-4 py-1 text-[10px] font-black uppercase tracking-widest flex justify-between items-center animate-in slide-in-from-top duration-300">
                     <span>Offline Mode Active • Sales will sync automatically</span>

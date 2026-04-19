@@ -18,10 +18,11 @@ import {
     TrendingUp,
 } from 'lucide-react';
 import { useNavigate } from '@tanstack/react-router';
-import { format, formatDistanceToNow, subDays, startOfToday, endOfToday } from 'date-fns';
+import { format, subDays, startOfToday, endOfToday } from 'date-fns';
 import { pharmacyService } from '../../services/pharmacy.service';
-import type { Alert, DashboardSummary, ReorderSuggestion, Stock } from '../../types/pharmacy';
+import type { DashboardSummary, ReorderSuggestion, Stock } from '../../types/pharmacy';
 import { ConsumptionTrendChart } from './DashboardCharts';
+import { DashboardABCStockChart } from './DashboardABCStockChart';
 import { ChartSkeleton, StatCardSkeleton } from './DashboardSkeletons';
 import { SkeletonTable } from '../ui/SkeletonTable';
 import { cn } from '../../lib/utils';
@@ -62,11 +63,17 @@ interface TopStockMedicine {
     quantity: number;
 }
 
+type TopSellingRow = {
+    name: string;
+    value: number;
+    quantity?: number;
+    revenue?: number;
+};
+
 interface DashboardOwnerPanels {
     lowStock: ReorderSuggestion[];
-    criticalAlerts: Alert[];
     topStockMedicines: TopStockMedicine[];
-    topSelling: Array<{ name: string; value: number }>;
+    topSelling: TopSellingRow[];
 }
 
 export const DashboardOwner: React.FC<DashboardOwnerProps> = ({ facilityId }) => {
@@ -84,7 +91,6 @@ export const DashboardOwner: React.FC<DashboardOwnerProps> = ({ facilityId }) =>
     const [dateRange, setDateRange] = useState<DateRange>('7days');
     const [startDate, setStartDate] = useState<string>(format(startOfToday(), 'yyyy-MM-dd'));
     const [endDate, setEndDate] = useState<string>(format(endOfToday(), 'yyyy-MM-dd'));
-    const [alertsLastUpdatedAt, setAlertsLastUpdatedAt] = useState<Date | null>(null);
 
     const { data: expirationWarning = null } = useQuery({
         queryKey: ['subscription-expiration-warning'],
@@ -102,13 +108,8 @@ export const DashboardOwner: React.FC<DashboardOwnerProps> = ({ facilityId }) =>
         queryKey: ['dashboard-owner-panels', facilityId],
         queryFn: async (): Promise<DashboardOwnerPanels> => {
             try {
-                const [reorderData, alertsData, topSellingRows, stockData] = await Promise.all([
+                const [reorderData, topSellingRows, stockData] = await Promise.all([
                     pharmacyService.getReorderSuggestions(facilityId),
-                    pharmacyService.getAlerts({
-                        facility_id: facilityId || undefined,
-                        status: 'active',
-                        limit: 25,
-                    }),
                     pharmacyService.getTopSellingMedicines('DESC'),
                     pharmacyService.getStock({
                         ...(facilityId ? { facility_id: facilityId } : {}),
@@ -118,17 +119,6 @@ export const DashboardOwner: React.FC<DashboardOwnerProps> = ({ facilityId }) =>
                 ]);
 
                 const lowStockRows = Array.isArray(reorderData) ? reorderData.slice(0, 5) : [];
-
-                const alerts = Array.isArray(alertsData.data) ? alertsData.data : [];
-                const criticalRows = alerts
-                    .filter(
-                        (item) =>
-                            item.severity === 'critical' ||
-                            item.severity === 'out_of_stock' ||
-                            item.type === 'expired' ||
-                            item.type === 'low_stock',
-                    )
-                    .slice(0, 5);
 
                 const stockRows = Array.isArray(stockData.data) ? (stockData.data as Stock[]) : [];
                 const grouped = new Map<number, TopStockMedicine>();
@@ -152,8 +142,6 @@ export const DashboardOwner: React.FC<DashboardOwnerProps> = ({ facilityId }) =>
 
                 return {
                     lowStock: lowStockRows,
-                    criticalAlerts:
-                        criticalRows.length > 0 ? criticalRows : alerts.slice(0, 5),
                     topStockMedicines: Array.from(grouped.values())
                         .sort((a, b) => b.quantity - a.quantity)
                         .slice(0, 5),
@@ -163,7 +151,6 @@ export const DashboardOwner: React.FC<DashboardOwnerProps> = ({ facilityId }) =>
                 console.error('Failed to load dashboard panels:', error);
                 return {
                     lowStock: [],
-                    criticalAlerts: [],
                     topStockMedicines: [],
                     topSelling: [],
                 };
@@ -172,7 +159,6 @@ export const DashboardOwner: React.FC<DashboardOwnerProps> = ({ facilityId }) =>
     });
 
     const lowStock = panelsData?.lowStock ?? [];
-    const criticalAlerts = panelsData?.criticalAlerts ?? [];
     const topStockMedicines = panelsData?.topStockMedicines ?? [];
     const topSelling = panelsData?.topSelling ?? [];
     const quickActions = [
@@ -244,12 +230,6 @@ export const DashboardOwner: React.FC<DashboardOwnerProps> = ({ facilityId }) =>
     };
 
     useEffect(() => {
-        if (panelsData) {
-            setAlertsLastUpdatedAt(new Date());
-        }
-    }, [panelsData]);
-
-    useEffect(() => {
         if (!socket) return;
         const refreshPanels = () => {
             void queryClient.invalidateQueries({ queryKey: ['dashboard-owner-panels', facilityId] });
@@ -259,29 +239,43 @@ export const DashboardOwner: React.FC<DashboardOwnerProps> = ({ facilityId }) =>
             void queryClient.invalidateQueries({ queryKey: ['dashboard-owner-kpis'] });
         };
 
+        const refreshAbcAnalysis = () => {
+            void queryClient.invalidateQueries({ queryKey: ['dashboard-abc-analysis'] });
+        };
+
+        const onStockOrInventoryChanged = () => {
+            refreshPanels();
+            refreshAbcAnalysis();
+        };
+
+        const onSaleRecorded = () => {
+            refreshKpis();
+            refreshAbcAnalysis();
+        };
+
         socket.on('alert:new', refreshPanels);
         socket.on('alert:updated', refreshPanels);
         socket.on('alert:resolved', refreshPanels);
         socket.on('notification:new', refreshPanels);
-        socket.on('stock:updated', refreshPanels);
-        socket.on('inventory:changed', refreshPanels);
-        socket.on('sale:created', refreshKpis);
-        socket.on('sale:completed', refreshKpis);
+        socket.on('stock:updated', onStockOrInventoryChanged);
+        socket.on('inventory:changed', onStockOrInventoryChanged);
+        socket.on('sale:created', onSaleRecorded);
+        socket.on('sale:completed', onSaleRecorded);
 
         return () => {
             socket.off('alert:new', refreshPanels);
             socket.off('alert:updated', refreshPanels);
             socket.off('alert:resolved', refreshPanels);
             socket.off('notification:new', refreshPanels);
-            socket.off('stock:updated', refreshPanels);
-            socket.off('inventory:changed', refreshPanels);
-            socket.off('sale:created', refreshKpis);
-            socket.off('sale:completed', refreshKpis);
+            socket.off('stock:updated', onStockOrInventoryChanged);
+            socket.off('inventory:changed', onStockOrInventoryChanged);
+            socket.off('sale:created', onSaleRecorded);
+            socket.off('sale:completed', onSaleRecorded);
         };
     }, [socket, queryClient, facilityId]);
 
     return (
-        <div className="space-y-6 p-4 min-h-screen bg-[#F8FAFC] text-[#111827] dark:bg-slate-950 dark:text-slate-100">
+        <div className="space-y-6 py-6 px-0 min-h-screen bg-[#F8FAFC] text-[#111827] dark:bg-slate-950 dark:text-slate-100">
             {(expirationWarning?.isExpiringSoon || expirationWarning?.isExpired) && (
                 <div
                     className={cn(
@@ -460,46 +454,42 @@ export const DashboardOwner: React.FC<DashboardOwnerProps> = ({ facilityId }) =>
                 )}
             </div>
 
-            <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
-                <div className="xl:col-span-2 bg-[#FFFFFF] dark:bg-slate-900 rounded-2xl border border-[#E5E7EB] dark:border-slate-700 shadow-sm overflow-hidden">
-                    <div className="px-5 py-4 border-b border-[#E5E7EB] dark:border-slate-700 flex items-center justify-between">
-                        <h3 className="text-lg font-semibold text-[#111827] dark:text-slate-100">
-                            Sales trend
-                        </h3>
-                        <button
-                            onClick={() =>
-                                navigate({ to: '/app/analytics/sales' as any, search: {} as any })
-                            }
-                            className="text-xs font-semibold text-[#2563EB] dark:text-blue-300 hover:underline inline-flex items-center gap-1"
-                        >
-                            View Report <ArrowRight size={13} />
-                        </button>
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 min-w-0">
+                <div className="min-w-0 bg-[#FFFFFF] dark:bg-slate-900 rounded-2xl border border-[#E5E7EB] dark:border-slate-700 shadow-sm overflow-hidden">
+                        <div className="px-5 py-4 border-b border-[#E5E7EB] dark:border-slate-700 flex items-center justify-between">
+                            <h3 className="text-lg font-semibold text-[#111827] dark:text-slate-100">
+                                Sales trend
+                            </h3>
+                            <button
+                                onClick={() =>
+                                    navigate({ to: '/app/analytics/sales' as any, search: {} as any })
+                                }
+                                className="text-xs font-semibold text-[#2563EB] dark:text-blue-300 hover:underline inline-flex items-center gap-1"
+                            >
+                                View Report <ArrowRight size={13} />
+                            </button>
+                        </div>
+                        <div className="p-5">
+                            {kpiLoading ? (
+                                <ChartSkeleton />
+                            ) : (
+                                <div className="h-[250px]">
+                                    <ConsumptionTrendChart
+                                        data={
+                                            summary?.sales_trend?.map((d) => ({
+                                                date: d.date,
+                                                dispensed: d.sales,
+                                                received: 0,
+                                            })) || []
+                                        }
+                                    />
+                                </div>
+                            )}
+                        </div>
                     </div>
-                    <div className="p-5">
-                        {kpiLoading ? (
-                            <ChartSkeleton />
-                        ) : (
-                            <div className="h-[250px]">
-                                <ConsumptionTrendChart
-                                    data={
-                                        summary?.sales_trend?.map((d) => ({
-                                            date: d.date,
-                                            dispensed: d.sales,
-                                            received: 0,
-                                        })) || []
-                                    }
-                                />
-                            </div>
-                        )}
-                    </div>
+                <div className="min-w-0">
+                    <DashboardABCStockChart facilityId={facilityId} />
                 </div>
-
-                <CriticalAlertsCard
-                    loading={panelLoading}
-                    rows={criticalAlerts}
-                    lastUpdatedAt={alertsLastUpdatedAt}
-                    onViewAll={() => navigate({ to: '/app/alerts' as any, search: {} as any })}
-                />
             </div>
 
             <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
@@ -677,76 +667,6 @@ const LowStockCard: React.FC<{
     );
 };
 
-const CriticalAlertsCard: React.FC<{
-    loading?: boolean;
-    rows: Alert[];
-    lastUpdatedAt?: Date | null;
-    onViewAll: () => void;
-}> = ({ loading, rows, lastUpdatedAt, onViewAll }) => {
-    return (
-        <div className="bg-[#FFFFFF] dark:bg-slate-900 rounded-2xl border border-[#E5E7EB] dark:border-slate-700 shadow-sm overflow-hidden">
-            <div className="px-5 py-4 border-b border-[#E5E7EB] dark:border-slate-700">
-                <h3 className="text-lg font-semibold text-[#111827] dark:text-slate-100">
-                    Critical alerts
-                </h3>
-                {lastUpdatedAt && (
-                    <p className="text-[11px] text-[#6B7280] dark:text-slate-400 mt-1">
-                        Last updated {formatDistanceToNow(lastUpdatedAt, { addSuffix: true })}
-                    </p>
-                )}
-            </div>
-
-            {loading ? (
-                <SkeletonTable
-                    rows={5}
-                    columns={2}
-                    headers={null}
-                    className="border-none shadow-none"
-                />
-            ) : rows.length > 0 ? (
-                <div className="divide-y divide-[#E5E7EB] dark:divide-slate-700">
-                    {rows.slice(0, 5).map((alert) => (
-                        <div
-                            key={alert.id}
-                            className="px-5 py-4 flex items-start justify-between gap-3"
-                        >
-                            <div>
-                                <p className="text-sm font-semibold text-[#111827] dark:text-slate-100 line-clamp-1">
-                                    {alert.title || alert.message}
-                                </p>
-                                <p className="text-xs text-[#6B7280] dark:text-slate-400 mt-0.5 line-clamp-1">
-                                    {alert.medicine?.name || alert.message}
-                                </p>
-                            </div>
-                            <span
-                                className={cn(
-                                    'shrink-0 px-2 py-1 rounded-md text-[11px] font-semibold',
-                                    alert.severity === 'critical' || alert.type === 'expired'
-                                        ? 'bg-[#FEE2E2] text-[#991B1B]'
-                                        : 'bg-[#FEF3C7] text-[#92400E]',
-                                )}
-                            >
-                                {alert.severity}
-                            </span>
-                        </div>
-                    ))}
-                </div>
-            ) : (
-                <div className="px-5 py-10 text-center text-sm text-[#6B7280] dark:text-slate-400">
-                    No active alerts
-                </div>
-            )}
-
-            <button
-                onClick={onViewAll}
-                className="w-full border-t border-[#E5E7EB] dark:border-slate-700 px-5 py-3 text-center text-sm font-semibold text-[#2563EB] dark:text-blue-300 hover:bg-[#F8FAFC] dark:hover:bg-slate-800"
-            >
-                View All Alerts
-            </button>
-        </div>
-    );
-};
-
 const TopStockMedicinesCard: React.FC<{
     loading?: boolean;
     rows: TopStockMedicine[];
@@ -803,46 +723,65 @@ const TopStockMedicinesCard: React.FC<{
 
 const TopSellingMedicinesCard: React.FC<{
     loading?: boolean;
-    rows: Array<{ name: string; value: number }>;
+    rows: TopSellingRow[];
 }> = ({ loading, rows }) => {
+    const { formatMoney } = useRuntimeConfig();
+
     return (
         <div className="bg-[#FFFFFF] dark:bg-slate-900 rounded-2xl border border-[#E5E7EB] dark:border-slate-700 shadow-sm overflow-hidden">
             <div className="px-5 py-4 border-b border-[#E5E7EB] dark:border-slate-700 flex justify-between items-center">
-                <h3 className="text-lg font-semibold text-[#111827] dark:text-slate-100">
-                    Top selling medicines
-                </h3>
+                <div>
+                    <h3 className="text-lg font-semibold text-[#111827] dark:text-slate-100">
+                        Top selling medicines
+                    </h3>
+                    <p className="mt-0.5 text-[11px] font-medium text-[#64748B] dark:text-slate-400">
+                        Units and sales value (POS + dispensing) for the selected branch.
+                    </p>
+                </div>
             </div>
 
             {loading ? (
                 <SkeletonTable
                     rows={5}
-                    columns={2}
+                    columns={3}
                     headers={null}
                     className="border-none shadow-none"
                 />
             ) : (
                 <div className="divide-y divide-[#E5E7EB] dark:divide-slate-700">
-                    <div className="grid grid-cols-[1.5fr_0.8fr] gap-2 px-5 py-3 text-xs font-semibold text-[#6B7280] dark:text-slate-400">
+                    <div className="grid grid-cols-[minmax(0,1.4fr)_0.55fr_1fr] gap-2 px-5 py-3 text-xs font-semibold text-[#6B7280] dark:text-slate-400">
                         <span>Medicine</span>
-                        <span className="text-right">Units sold</span>
+                        <span className="text-right">Units</span>
+                        <span className="text-right">Sales value</span>
                     </div>
                     {rows.length > 0 ? (
-                        rows.slice(0, 5).map((item, index) => (
-                            <div
-                                key={`${item.name}-${index}`}
-                                className="grid grid-cols-[1.5fr_0.8fr] gap-2 px-5 py-3 text-sm"
-                            >
-                                <span className="font-semibold text-[#111827] dark:text-slate-100 truncate">
-                                    {item.name}
-                                </span>
-                                <span className="text-right font-semibold text-[#10B981] dark:text-emerald-300">
-                                    {Number(item.value || 0).toLocaleString()}
-                                </span>
-                            </div>
-                        ))
+                        rows.slice(0, 5).map((item, index) => {
+                            const units = Number(
+                                item.quantity !== undefined ? item.quantity : item.value ?? 0,
+                            );
+                            const revenue = Number(item.revenue !== undefined ? item.revenue : 0);
+                            const safeUnits = Number.isFinite(units) ? units : 0;
+                            const safeRevenue = Number.isFinite(revenue) ? revenue : 0;
+                            return (
+                                <div
+                                    key={`${item.name}-${index}`}
+                                    className="grid grid-cols-[minmax(0,1.4fr)_0.55fr_1fr] gap-2 px-5 py-3 text-sm"
+                                >
+                                    <span className="font-semibold text-[#111827] dark:text-slate-100 truncate">
+                                        {item.name}
+                                    </span>
+                                    <span className="text-right font-semibold tabular-nums text-[#0F172A] dark:text-slate-200">
+                                        {safeUnits.toLocaleString()}
+                                    </span>
+                                    <span className="text-right font-semibold tabular-nums text-[#10B981] dark:text-emerald-300">
+                                        {formatMoney(safeRevenue)}
+                                    </span>
+                                </div>
+                            );
+                        })
                     ) : (
                         <div className="px-5 py-8 text-center text-sm text-[#6B7280] dark:text-slate-400">
-                            No selling data
+                            No selling data for this branch yet, or select a branch to load rankings.
                         </div>
                     )}
                 </div>

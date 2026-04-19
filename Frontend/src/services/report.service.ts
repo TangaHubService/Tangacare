@@ -38,7 +38,16 @@ export const reportService = {
 
     async getTopSellingMedicines(
         order: 'ASC' | 'DESC' = 'DESC',
-    ): Promise<{ name: string; value: number }[]> {
+    ): Promise<
+        Array<{
+            name: string;
+            /** Units sold (POS + dispensing) */
+            value: number;
+            quantity?: number;
+            revenue?: number;
+            medicine_id?: number;
+        }>
+    > {
         const response = await api.get('/pharmacy/top-selling', { params: { order } });
         return (response.data as any).data ?? (response.data as any);
     },
@@ -79,6 +88,27 @@ export const reportService = {
         }>;
     }> {
         const response = await api.get<any>(`/pharmacy/reports/low-stock/${facilityId}`);
+        return (response.data as any).data ?? response.data;
+    },
+
+    async getBatchStockReconciliation(facilityId: number): Promise<{
+        facility_id: number;
+        organization_id: number | null;
+        generated_at: string;
+        mismatches: Array<{
+            batch_id: number;
+            batch_number: string;
+            medicine_id: number;
+            medicine_name: string;
+            batch_current_quantity: number;
+            stock_rows_sum: number;
+            delta: number;
+        }>;
+        mismatch_count: number;
+    }> {
+        const response = await api.get<any>(
+            `/pharmacy/reports/batch-stock-reconciliation/${facilityId}`,
+        );
         return (response.data as any).data ?? response.data;
     },
 
@@ -748,5 +778,16 @@ export const reportService = {
     ): Promise<Alert> {
         const response = await api.put<{ data: Alert }>(`/pharmacy/alerts/${id}/resolve`, data);
         return (response.data as any).data ?? (response.data as any);
+    },
+
+    buildControlledMedicineRegisterExportUrl(params: { start_date: string; end_date: string }): string {
+        const qs = new URLSearchParams(params).toString();
+        const base = api.defaults.baseURL || '';
+        return `${base}/pharmacy/reports/controlled-medicine-register/export?${qs}`;
+    },
+
+    async listAlertDeliveryLogs(params?: { page?: number; limit?: number }): Promise<any> {
+        const response = await api.get<any>('/pharmacy/alerts/delivery-logs', { params });
+        return (response.data as any).data ?? response.data;
     },
 };

@@ -6,7 +6,7 @@ import {
     Navigate,
 } from '@tanstack/react-router';
 import React from 'react';
-import { GlobalLoading } from '../components/ui/GlobalLoading';
+import { RouteContentFallback } from '../components/ui/RouteContentFallback';
 import { z } from 'zod';
 import { RequirePermission } from '../components/auth/RequirePermission';
 import { PERMISSIONS } from '../types/auth';
@@ -256,7 +256,8 @@ const routeTree = rootRoute.addChildren([
 
 export const router = createRouter({
     routeTree,
-    defaultPendingComponent: GlobalLoading,
+    defaultPendingComponent: RouteContentFallback,
+    defaultPreload: 'intent',
 });
 
 declare module '@tanstack/react-router' {

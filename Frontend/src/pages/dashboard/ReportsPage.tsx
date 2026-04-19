@@ -33,6 +33,8 @@ import { PurchaseReport } from '../../components/pharmacy/reports/PurchaseReport
 import { FastSlowMovingReport } from '../../components/pharmacy/reports/FastSlowMovingReport';
 import type { Medicine } from '../../types/pharmacy';
 import { toast } from 'react-hot-toast';
+import { PERMISSIONS } from '../../types/auth';
+import { formatPharmacyApiError } from '../../lib/pharmacyApiErrors';
 
 export interface ReportsPageProps {
     defaultTab?: string;
@@ -47,6 +49,16 @@ const VALID_REPORT_TABS = new Set([
     'customer',
     'tax',
 ]);
+
+const REPORT_TAB_HINTS: Record<string, string> = {
+    sales: 'Revenue, margins, and line-level sales for the selected date range.',
+    stock: 'On-hand quantities and valuation for this branch — pair with Replenish for ordering.',
+    purchase: 'Incoming purchase orders and spend — validate against draft POs from replenishment.',
+    'fast-moving': 'Fast vs slow movers and ABC-style signals for promos and shelf resets.',
+    performance: 'Throughput by team member where POS attribution is available.',
+    customer: 'Visits and spend patterns for loyalty follow-ups.',
+    tax: 'VAT and taxable sales — aligns with branch fiscal settings.',
+};
 
 const SECONDARY_REPORT_ACTIONS = [
     {
@@ -334,33 +346,27 @@ export function ReportsPage({ defaultTab = 'sales' }: ReportsPageProps) {
             setMoreMenuOpen(false);
         } catch (error) {
             console.error('Export failed:', error);
-            toast.error('Failed to export report.');
+            toast.error(formatPharmacyApiError(error));
         }
     };
 
     return (
         <ProtectedRoute
-            allowedRoles={[
-                'ADMIN',
-                'SUPER_ADMIN',
-                'SUPER ADMIN',
-                'FACILITY_ADMIN',
-                'FACILITY ADMIN',
-                'OWNER',
-                'STORE_MANAGER',
-                'STORE MANAGER',
-                'AUDITOR',
-            ]}
+            requiredPermissions={[PERMISSIONS.REPORTS_READ]}
             requireFacility
         >
-            <div className="max-w-7xl mx-auto px-4 sm:px-6 py-6 sm:py-8 space-y-6 animate-in fade-in duration-500">
+            <div className="w-full min-w-0 px-3 sm:px-4 py-4 sm:py-5 space-y-4 animate-in fade-in duration-500">
                 <header className="rounded-2xl border border-slate-200/90 dark:border-slate-700/90 bg-white dark:bg-slate-900/70 shadow-sm overflow-visible">
-                    <div className="p-5 sm:p-6 border-b border-slate-100 dark:border-slate-800/90 bg-gradient-to-br from-slate-50/90 to-white dark:from-slate-900 dark:to-slate-900/80">
-                        <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+                    <div className="p-4 sm:p-5 border-b border-slate-100 dark:border-slate-800/90 bg-gradient-to-br from-slate-50/90 to-white dark:from-slate-900 dark:to-slate-900/80">
+                        <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                             <div className="min-w-0">
-                                <h1 className="text-2xl sm:text-3xl font-black tracking-tight text-healthcare-dark dark:text-white">
+                                <h1 className="text-xl sm:text-2xl font-black tracking-tight text-healthcare-dark dark:text-white">
                                     Reports
                                 </h1>
+                                <p className="text-sm text-slate-500 dark:text-slate-400 mt-1.5 max-w-2xl leading-snug">
+                                    {REPORT_TAB_HINTS[resolvedTab] ??
+                                        'Use the main tabs or More for related analytics. Export is available when a dataset is loaded.'}
+                                </p>
                             </div>
                             <div className="flex flex-wrap items-center justify-end gap-2 sm:gap-3 w-full sm:w-auto shrink-0">
                                 <div className="relative">
@@ -435,8 +441,8 @@ export function ReportsPage({ defaultTab = 'sales' }: ReportsPageProps) {
                 </header>
 
                 {['sales', 'tax', 'performance', 'purchase'].includes(resolvedTab) && (
-                    <div className="rounded-2xl border border-slate-200/90 dark:border-slate-700/90 bg-white dark:bg-slate-900/50 px-4 py-4 sm:px-5 sm:py-4 shadow-sm">
-                        <div className="flex flex-wrap items-center gap-2 mb-3">
+                    <div className="rounded-2xl border border-slate-200/90 dark:border-slate-700/90 bg-white dark:bg-slate-900/50 px-3 py-3 sm:px-4 sm:py-3 shadow-sm">
+                        <div className="flex flex-wrap items-center gap-2 mb-2">
                             <SlidersHorizontal
                                 size={16}
                                 className="text-slate-400 shrink-0"
@@ -448,7 +454,7 @@ export function ReportsPage({ defaultTab = 'sales' }: ReportsPageProps) {
                         </div>
                         <div
                             className={cn(
-                                'flex flex-col gap-4',
+                                'flex flex-col gap-3',
                                 resolvedTab === 'sales'
                                     ? 'lg:flex-row lg:items-center lg:justify-between'
                                     : 'lg:flex-row lg:items-center lg:justify-end',
@@ -505,7 +511,7 @@ export function ReportsPage({ defaultTab = 'sales' }: ReportsPageProps) {
                     </div>
                 )}
 
-                <div className="min-h-[400px] space-y-6">
+                <div className="space-y-4">
                     {resolvedTab === 'sales' && (
                         <SalesReports
                             facilityId={effectiveFacilityId}
@@ -1055,10 +1061,10 @@ function SalesReports({
         );
 
     return (
-        <div className="space-y-6">
+        <div className="space-y-4">
             {view === 'general' && (
                 <>
-                    <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-3 md:gap-4">
                         <SummaryCard
                             title="Gross profit"
                             value={`RWF ${Number(profit?.profit || 0).toLocaleString()}`}
@@ -1159,8 +1165,8 @@ function SalesReports({
             )}
 
             {view === 'purchase-vs-sales' && (
-                <div className="space-y-5">
-                    <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-4">
+                <div className="space-y-4">
+                    <div className="grid grid-cols-1 gap-2 sm:gap-3 md:grid-cols-2 xl:grid-cols-4">
                         <div className="rounded-2xl border border-slate-200/80 bg-white/90 p-4 dark:border-slate-800 dark:bg-slate-950/70">
                             <p className="text-[10px] font-black uppercase tracking-[0.22em] text-slate-400">
                                 Purchases
@@ -1214,8 +1220,8 @@ function SalesReports({
                         </div>
                     </div>
 
-                    <div className="overflow-hidden rounded-[28px]">
-                        <div className="max-h-[560px] overflow-auto border border-slate-100 dark:border-slate-800 rounded-[24px]">
+                    <div className="overflow-hidden rounded-xl">
+                        <div className="max-h-[min(560px,55vh)] overflow-auto border border-slate-100 dark:border-slate-800 rounded-xl">
                             <table className="tc-table min-w-full text-xs">
                                 <thead className="sticky top-0 bg-slate-50/95 backdrop-blur dark:bg-slate-900/95">
                                     <tr className="text-slate-400 uppercase">
@@ -1279,8 +1285,8 @@ function SalesReports({
             )}
 
             {view === 'medicine-margin' && (
-                <div className="space-y-5">
-                    <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-4">
+                <div className="space-y-4">
+                    <div className="grid grid-cols-1 gap-2 sm:gap-3 md:grid-cols-2 xl:grid-cols-4">
                         <div className="rounded-2xl border border-slate-200/80 bg-white/90 p-4 dark:border-slate-800 dark:bg-slate-950/70">
                             <p className="text-[10px] font-black uppercase tracking-[0.22em] text-slate-400">
                                 Revenue
@@ -1327,8 +1333,8 @@ function SalesReports({
                         </div>
                     </div>
 
-                    <div className="overflow-hidden rounded-[28px]">
-                        <div className="max-h-[680px] overflow-auto border border-slate-100 dark:border-slate-800 rounded-[24px]">
+                    <div className="overflow-hidden rounded-xl">
+                        <div className="max-h-[min(680px,60vh)] overflow-auto border border-slate-100 dark:border-slate-800 rounded-xl">
                             <table className="tc-table min-w-full text-xs">
                                 <thead className="sticky top-0 bg-slate-50/95 backdrop-blur dark:bg-slate-900/95">
                                     <tr className="text-slate-400 uppercase">

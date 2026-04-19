@@ -31,6 +31,10 @@ const BatchRecallPage = lazyNamed(
     () => import('../../pages/dashboard/BatchRecallPage'),
     'BatchRecallPage',
 );
+const QualityCasesPage = lazyNamed(
+    () => import('../../pages/dashboard/QualityCasesPage'),
+    'QualityCasesPage',
+);
 const ReorderDashboardPage = lazyNamed(
     () => import('../../pages/dashboard/ReorderDashboardPage'),
     'ReorderDashboardPage',
@@ -122,12 +126,25 @@ export const createInventoryRoutes = (parentRoute: any) => {
             ),
     });
 
+    const qualityCasesRoute = createRoute({
+        getParentRoute: () => parentRoute,
+        path: 'quality-cases',
+        component: () =>
+            withRouteSuspense(
+                <RequirePermission permission={PERMISSIONS.INVENTORY_READ}>
+                    <QualityCasesPage />
+                </RequirePermission>,
+            ),
+    });
+
     const replenishRoute = createRoute({
         getParentRoute: () => parentRoute,
         path: 'replenish',
         component: () =>
             withRouteSuspense(
-                <RequirePermission permission={PERMISSIONS.PROCUREMENT_READ}>
+                <RequirePermission
+                    permissions={[PERMISSIONS.PROCUREMENT_READ, PERMISSIONS.INVENTORY_WRITE]}
+                >
                     <ReorderDashboardPage />
                 </RequirePermission>,
             ),
@@ -153,6 +170,7 @@ export const createInventoryRoutes = (parentRoute: any) => {
         stocktakingRoute,
         variancesRoute,
         recallsRoute,
+        qualityCasesRoute,
         replenishRoute,
         reorderDashboardLegacyRoute,
         stockRegisterRoute,

@@ -27,6 +27,13 @@ const supplierSchema = yup.object({
     payment_terms: yup.string().optional().default(''),
     priority: yup.number().min(1).max(10).optional().default(undefined),
     is_active: yup.boolean().default(true),
+    qualification_status: yup
+        .string()
+        .oneOf(['qualified', 'pending', 'suspended'])
+        .optional()
+        .default('qualified'),
+    qualification_expires_at: yup.string().optional().default(''),
+    licence_document_url: yup.string().optional().default(''),
 });
 
 type SupplierFormData = yup.InferType<typeof supplierSchema>;
@@ -53,6 +60,9 @@ export function SupplierModal({ isOpen, onClose, onSuccess, supplier }: Supplier
             payment_terms: '',
             priority: undefined as number | undefined,
             is_active: true,
+            qualification_status: 'qualified' as const,
+            qualification_expires_at: '',
+            licence_document_url: '',
         },
     });
 
@@ -71,6 +81,11 @@ export function SupplierModal({ isOpen, onClose, onSuccess, supplier }: Supplier
                     payment_terms: supplier.payment_terms || '',
                     priority: supplier.priority,
                     is_active: supplier.is_active,
+                    qualification_status: supplier.qualification_status || 'qualified',
+                    qualification_expires_at: supplier.qualification_expires_at
+                        ? String(supplier.qualification_expires_at).split('T')[0]
+                        : '',
+                    licence_document_url: supplier.licence_document_url || '',
                 });
             } else {
                 reset({
@@ -85,6 +100,9 @@ export function SupplierModal({ isOpen, onClose, onSuccess, supplier }: Supplier
                     payment_terms: '',
                     priority: undefined,
                     is_active: true,
+                    qualification_status: 'qualified',
+                    qualification_expires_at: '',
+                    licence_document_url: '',
                 });
             }
         }
@@ -331,6 +349,48 @@ export function SupplierModal({ isOpen, onClose, onSuccess, supplier }: Supplier
                                     placeholder="Optional"
                                     className="w-full px-4 py-3 bg-white dark:bg-slate-800 border-2 border-slate-600 dark:border-slate-600 rounded-2xl font-bold text-sm"
                                 />
+                            </div>
+                        </div>
+
+                        <div className="rounded-2xl border-2 border-slate-200 dark:border-slate-700 p-4 space-y-3">
+                            <p className="text-[10px] font-black uppercase text-slate-400 tracking-widest">
+                                Qualification (procurement)
+                            </p>
+                            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                                <div className="space-y-1.5">
+                                    <label className="text-[10px] font-black uppercase text-slate-400 tracking-widest ml-1">
+                                        Status
+                                    </label>
+                                    <select
+                                        {...register('qualification_status')}
+                                        className="w-full px-4 py-3 bg-white dark:bg-slate-800 border-2 border-slate-600 rounded-2xl font-bold text-sm"
+                                    >
+                                        <option value="qualified">Qualified</option>
+                                        <option value="pending">Pending</option>
+                                        <option value="suspended">Suspended</option>
+                                    </select>
+                                </div>
+                                <div className="space-y-1.5">
+                                    <label className="text-[10px] font-black uppercase text-slate-400 tracking-widest ml-1">
+                                        Qualification expires
+                                    </label>
+                                    <input
+                                        {...register('qualification_expires_at')}
+                                        type="date"
+                                        className="w-full px-4 py-3 bg-white dark:bg-slate-800 border-2 border-slate-600 rounded-2xl font-bold text-sm"
+                                    />
+                                </div>
+                                <div className="space-y-1.5 md:col-span-1">
+                                    <label className="text-[10px] font-black uppercase text-slate-400 tracking-widest ml-1">
+                                        Licence / COA URL
+                                    </label>
+                                    <input
+                                        {...register('licence_document_url')}
+                                        type="url"
+                                        placeholder="https://…"
+                                        className="w-full px-4 py-3 bg-white dark:bg-slate-800 border-2 border-slate-600 rounded-2xl font-bold text-sm"
+                                    />
+                                </div>
                             </div>
                         </div>
                     </div>

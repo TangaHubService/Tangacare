@@ -381,6 +381,38 @@ export interface Supplier {
     priority?: number;
     is_active: boolean;
     created_at?: string;
+    qualification_status?: 'qualified' | 'pending' | 'suspended';
+    qualification_expires_at?: string | null;
+    licence_document_url?: string | null;
+}
+
+export type QualityCaseType = 'complaint' | 'capa' | 'adr';
+export type QualityCaseStatus = 'open' | 'investigating' | 'closed';
+
+export interface QualityCase {
+    id: number;
+    organization_id: number;
+    facility_id: number | null;
+    type: QualityCaseType;
+    status: QualityCaseStatus;
+    title: string;
+    description: string;
+    medicine_id?: number | null;
+    batch_id?: number | null;
+    capa_actions?: string | null;
+    reported_at: string;
+    closed_at?: string | null;
+}
+
+/** Body for POST /pharmacy/quality-cases */
+export interface CreateQualityCaseInput {
+    facility_id: number;
+    type: QualityCaseType;
+    title: string;
+    description: string;
+    medicine_id?: number;
+    batch_id?: number;
+    capa_actions?: string;
 }
 
 export interface ProcurementOrderItem {
@@ -399,6 +431,9 @@ export interface ProcurementOrderItem {
     total_price: number;
     status?: string;
     notes?: string;
+    /** Last physical receipt snapshot for this line (from GR posting). */
+    last_receipt_qc_pass?: boolean | null;
+    last_receipt_variance_qty?: number | null;
     medicine?: Medicine;
 }
 
@@ -455,6 +490,8 @@ export interface ProcurementOrder {
     created_by?: User;
     items?: ProcurementOrderItem[];
     activities?: PurchaseOrderActivity[];
+    /** Latest goods receipt id posted against this PO (receiving traceability). */
+    last_goods_receipt_id?: number | null;
 }
 
 export interface GoodsReceiptItem {
@@ -468,6 +505,9 @@ export interface GoodsReceiptItem {
     selling_price?: number;
     batch_number?: string;
     expiry_date?: string;
+    qc_pass?: boolean | null;
+    variance_quantity?: number | null;
+    storage_condition_note?: string | null;
     medicine?: Medicine;
     batch?: Batch;
 }
@@ -481,6 +521,9 @@ export interface GoodsReceipt {
     received_by_id: number;
     received_date: string;
     notes?: string;
+    storage_condition_note?: string | null;
+    qc_pass?: boolean | null;
+    coa_attachment_url?: string | null;
     created_at?: string;
     updated_at?: string;
     purchase_order?: ProcurementOrder;

@@ -3,6 +3,7 @@ import { useAuth } from '../../context/AuthContext';
 import { Navigate } from '@tanstack/react-router';
 import { isSuperAdmin } from '../../types/auth';
 import type { Permission } from '../../types/auth';
+import { CompactRouteSkeleton } from '../ui/RouteContentFallback';
 
 interface RequirePermissionProps {
     permission?: Permission;
@@ -19,8 +20,8 @@ export const RequirePermission: React.FC<RequirePermissionProps> = ({
 
     if (isLoading) {
         return (
-            <div className="flex h-screen w-full items-center justify-center">
-                <div className="h-8 w-8 animate-spin rounded-full border-4 border-healthcare-primary border-t-transparent"></div>
+            <div className="flex w-full min-h-[min(50vh,calc(100dvh-12rem))] flex-col items-center justify-center py-8">
+                <CompactRouteSkeleton />
             </div>
         );
     }

@@ -16,12 +16,15 @@ const PrescriptionsPage = lazyNamed(
 );
 
 export const createSalesRoutes = (parentRoute: any) => {
+    /** Browse catalog with read; checkout still requires `dispensing:write` inside the page. */
     const dispensingRoute = createRoute({
         getParentRoute: () => parentRoute,
         path: 'dispensing',
         component: () =>
             withRouteSuspense(
-                <RequirePermission permission={PERMISSIONS.DISPENSING_READ}>
+                <RequirePermission
+                    permissions={[PERMISSIONS.DISPENSING_READ, PERMISSIONS.DISPENSING_WRITE]}
+                >
                     <DispensingPage />
                 </RequirePermission>,
             ),
@@ -33,7 +36,9 @@ export const createSalesRoutes = (parentRoute: any) => {
         path: 'sell',
         component: () =>
             withRouteSuspense(
-                <RequirePermission permission={PERMISSIONS.DISPENSING_READ}>
+                <RequirePermission
+                    permissions={[PERMISSIONS.DISPENSING_READ, PERMISSIONS.DISPENSING_WRITE]}
+                >
                     <DispensingPage />
                 </RequirePermission>,
             ),

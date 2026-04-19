@@ -9,6 +9,8 @@ import type {
     VarianceStatus,
     VarianceType,
     StockVariance,
+    QualityCase,
+    CreateQualityCaseInput,
 } from '../types/pharmacy';
 import { normalizePaginatedResponse } from './utils';
 
@@ -223,5 +225,16 @@ export const inventoryService = {
         document.body.appendChild(link);
         link.click();
         link.remove();
+    },
+
+    async listQualityCases(params?: { page?: number; limit?: number }): Promise<PaginatedResponse<QualityCase>> {
+        const response = await api.get<any>('/pharmacy/quality-cases', { params });
+        return normalizePaginatedResponse<QualityCase>(response.data);
+    },
+
+    async createQualityCase(data: CreateQualityCaseInput): Promise<QualityCase> {
+        const response = await api.post<{ success?: boolean; data: QualityCase }>('/pharmacy/quality-cases', data);
+        const body = response.data as any;
+        return (body?.data ?? body) as QualityCase;
     },
 };

@@ -38,7 +38,7 @@ import {
 } from 'lucide-react';
 import logo from '../../assets/tanga-logo.png';
 import { useAuth } from '../../context/AuthContext';
-import { GlobalLoading } from '../ui/GlobalLoading';
+import { RouteContentFallback } from '../ui/RouteContentFallback';
 import { isSuperAdmin } from '../../types/auth';
 import { userHasPermission } from '../../lib/rolePermissions';
 import type { GlobalSearchResultItem, GlobalSearchResults } from '../../types/pharmacy';
@@ -230,6 +230,7 @@ const NAV_SECTIONS: NavSection[] = [
                         allowedPermissions: ['inventory:write'],
                     },
                     { to: '/app/recalls', icon: AlertTriangle, label: 'Expiry & recalls' },
+                    { to: '/app/quality-cases', icon: ScrollText, label: 'Quality cases' },
                     {
                         to: '/app/variances',
                         icon: Scale,
@@ -768,8 +769,6 @@ export function MainLayout() {
         .toUpperCase()
         .slice(0, 2);
 
-    if (isLoading) return <GlobalLoading />;
-
     return (
         <div className="layout-shell flex h-screen transition-colors duration-300 overflow-hidden">
             {/* Backdrop for mobile */}
@@ -1163,9 +1162,13 @@ export function MainLayout() {
                     </div>
                 </header>
 
-                <div className="layout-content-panel flex-1 overflow-auto">
-                    <div className="max-w-screen-2xl mx-auto h-full">
-                        {needsOnboarding && !window.location.pathname.includes('/onboarding') ? (
+                <div className="layout-content-panel flex-1 overflow-auto min-w-0">
+                    <div className="flex min-h-0 w-full min-w-0 flex-1 flex-col">
+                        {isLoading ? (
+                            <div className="flex min-h-0 flex-1 flex-col items-center justify-center py-6">
+                                <RouteContentFallback />
+                            </div>
+                        ) : needsOnboarding && !window.location.pathname.includes('/onboarding') ? (
                             <>
                                 <FacilityEmptyState
                                     onCreateClick={() => setShowSetupModal(true)}

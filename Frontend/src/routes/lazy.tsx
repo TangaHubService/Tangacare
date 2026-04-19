@@ -1,5 +1,5 @@
 import React, { Suspense } from 'react';
-import { GlobalLoading } from '../components/ui/GlobalLoading';
+import { RouteContentFallback } from '../components/ui/RouteContentFallback';
 
 export function lazyNamed<T extends React.ComponentType<any>>(
     loader: () => Promise<Record<string, any>>,
@@ -11,6 +11,7 @@ export function lazyNamed<T extends React.ComponentType<any>>(
     });
 }
 
+/** Keeps shell visible; skeleton only in the route outlet (not fullscreen lazy flash). */
 export function withRouteSuspense(element: React.ReactElement) {
-    return <Suspense fallback={<GlobalLoading />}>{element}</Suspense>;
+    return <Suspense fallback={<RouteContentFallback />}>{element}</Suspense>;
 }

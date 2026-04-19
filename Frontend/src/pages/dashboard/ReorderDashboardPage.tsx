@@ -1,9 +1,12 @@
 import { useState, useEffect } from 'react';
+import { Link } from '@tanstack/react-router';
 import { useAuth } from '../../context/AuthContext';
 import { pharmacyService } from '../../services/pharmacy.service';
 import { ProtectedRoute } from '../../components/auth/ProtectedRoute';
+import { PERMISSIONS } from '../../types/auth';
 import { SkeletonTable } from '../../components/ui/SkeletonTable';
 import type { ReorderSuggestion } from '../../types/pharmacy';
+import { toast } from 'react-hot-toast';
 import {
     ShoppingCart,
     Zap,
@@ -15,6 +18,7 @@ import {
     FilePlus,
     ClipboardList,
     Smartphone,
+    ExternalLink,
 } from 'lucide-react';
 
 export function ReorderDashboardPage() {
@@ -27,7 +31,6 @@ export function ReorderDashboardPage() {
     const [loading, setLoading] = useState(false);
     const [creatingPO, setCreatingPO] = useState(false);
     const [poCreated, setPoCreated] = useState<string | null>(null);
-
     const loadSuggestions = async () => {
         if (!effectiveFacilityId) return;
         setLoading(true);
@@ -91,7 +94,11 @@ export function ReorderDashboardPage() {
             loadSuggestions();
         } catch (error) {
             console.error('Failed to create POs', error);
-            alert('Error creating draft purchase orders.');
+            toast.error(
+                (error as any)?.response?.data?.message ||
+                    (error as any)?.message ||
+                    'Could not create draft purchase orders. Check procurement permissions.',
+            );
         } finally {
             setCreatingPO(false);
         }
@@ -105,14 +112,7 @@ export function ReorderDashboardPage() {
 
     return (
         <ProtectedRoute
-            allowedRoles={[
-                'ADMIN',
-                'SUPER_ADMIN',
-                'FACILITY_ADMIN',
-                'PHARMACIST',
-                'STORE_MANAGER',
-                'OWNER',
-            ]}
+            requiredPermissions={[PERMISSIONS.PROCUREMENT_READ, PERMISSIONS.INVENTORY_WRITE]}
             requireFacility
         >
             <div className="p-6 space-y-6 animate-in fade-in duration-500">
@@ -127,18 +127,33 @@ export function ReorderDashboardPage() {
                         </p>
                     </div>
 
-                    <button
-                        onClick={handleCreateDraftPOs}
-                        disabled={creatingPO || highUrgency.length === 0}
-                        className="flex items-center gap-2 px-6 py-3 bg-healthcare-primary text-white rounded-xl text-sm font-black hover:bg-teal-700 transition-all shadow-lg hover:shadow-teal-500/20 disabled:opacity-50"
-                    >
-                        {creatingPO ? (
-                            <Loader2 className="animate-spin" size={18} />
-                        ) : (
-                            <FilePlus size={18} />
-                        )}
-                        Auto-Generate Draft POs
-                    </button>
+                    <div className="flex flex-wrap items-center gap-2">
+                        <Link
+                            to="/app/procurement"
+                            className="inline-flex items-center gap-2 px-4 py-3 rounded-xl text-sm font-black border-2 border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-800/80 transition-all"
+                        >
+                            <ExternalLink size={18} />
+                            Open procurement
+                        </Link>
+                        <button
+                            type="button"
+                            onClick={handleCreateDraftPOs}
+                            disabled={creatingPO || highUrgency.length === 0}
+                            className="flex items-center gap-2 px-6 py-3 bg-healthcare-primary text-white rounded-xl text-sm font-black hover:bg-teal-700 transition-all shadow-lg hover:shadow-teal-500/20 disabled:opacity-50"
+                            title={
+                                highUrgency.length === 0
+                                    ? 'No critical/high urgency lines — scheduler still may create drafts overnight.'
+                                    : 'Create draft purchase orders from current critical suggestions'
+                            }
+                        >
+                            {creatingPO ? (
+                                <Loader2 className="animate-spin" size={18} />
+                            ) : (
+                                <FilePlus size={18} />
+                            )}
+                            Auto-Generate Draft POs
+                        </button>
+                    </div>
                 </div>
 
                 {poCreated && (

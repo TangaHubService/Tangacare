@@ -2,6 +2,7 @@ import React from 'react';
 import { Navigate, useLocation } from '@tanstack/react-router';
 import { useAuth } from '../../context/AuthContext';
 import { isSuperAdmin, type UserRole } from '../../types/auth';
+import { CompactRouteSkeleton } from '../ui/RouteContentFallback';
 
 interface ProtectedRouteProps {
     children: React.ReactNode;
@@ -28,13 +29,8 @@ export const ProtectedRoute: React.FC<ProtectedRouteProps> = ({
 
     if (isLoading) {
         return (
-            <div className="h-screen w-full flex items-center justify-center bg-healthcare-surface">
-                <div className="flex flex-col items-center gap-4">
-                    <div className="w-12 h-12 border-4 border-healthcare-primary/20 border-t-healthcare-primary rounded-full animate-spin"></div>
-                    <p className="text-healthcare-dark font-black text-sm animate-pulse">
-                        VERIFYING SESSION...
-                    </p>
-                </div>
+            <div className="flex w-full min-h-[min(50vh,calc(100dvh-12rem))] flex-col items-center justify-center py-8">
+                <CompactRouteSkeleton />
             </div>
         );
     }

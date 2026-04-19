@@ -128,6 +128,11 @@ export const KPIDashboard = ({
 
     return (
         <div className="space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-500">
+            <p className="text-sm text-slate-500 dark:text-slate-400 max-w-3xl leading-relaxed -mt-2">
+                KPIs summarize sales, margin, and inventory signals for the selected facility and dates.
+                Pair with <strong>Reports → Stock / Expiry</strong> and occasional cycle counts — analytics
+                complement on-hand records; they do not replace them.
+            </p>
             {/* Financial Overview */}
             <div>
                 <div className="flex items-center gap-3 mb-4">
