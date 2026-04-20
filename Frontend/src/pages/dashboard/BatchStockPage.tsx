@@ -228,7 +228,7 @@ export function BatchStockPage() {
         } catch {
             /* ignore */
         }
-        navigate({ to: '/app/sell', search: {} as never });
+        navigate({ to: '/app/sell', params: {} as any, search: {} as never });
     };
 
     const openAdjust = (row: OperationalBatchRow, initial?: 'decrease' | 'expired') => {
@@ -258,12 +258,12 @@ export function BatchStockPage() {
         } catch {
             /* ignore */
         }
-        navigate({ to: '/app/stock-movements', search: {} as never });
+        navigate({ to: '/app/stock-movements', params: {} as any, search: {} as never });
     };
 
     const openReturns = () => {
         closeActionsMenu();
-        navigate({ to: '/app/analytics/returns', search: {} as never });
+        navigate({ to: '/app/analytics/returns', params: {} as any, search: {} as never });
     };
 
     const requestMarkExpired = (row: OperationalBatchRow) => {

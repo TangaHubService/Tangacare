@@ -295,6 +295,7 @@ export function OperationsTodayPage() {
                         </h2>
                         <Link
                             to="/app/insurance"
+                            params={{} as any}
                             search={{} as any}
                             className="ml-auto text-xs font-bold text-teal-700 dark:text-teal-300 inline-flex items-center gap-1"
                         >

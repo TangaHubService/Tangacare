@@ -24,7 +24,6 @@ export function MedicineInventoryDetailDrawer({
     isOpen,
     onClose,
     facilityId,
-    onOpenFullRecord,
 }: MedicineInventoryDetailDrawerProps) {
     const { formatMoney } = useRuntimeConfig();
     const [batches, setBatches] = useState<Batch[]>([]);

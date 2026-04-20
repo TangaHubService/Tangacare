@@ -30,7 +30,7 @@ import { StockTransferModal } from '../../components/inventory/StockTransferModa
 import { AddStockModal } from '../../components/inventory/AddStockModal';
 import { toast } from 'react-hot-toast';
 import { toSentenceCase } from '../../lib/text';
-import { formatLocalDate, parseLocalDate } from '../../lib/date';
+import { parseLocalDate } from '../../lib/date';
 import { MedicineModal } from '../../components/inventory/MedicineModal';
 import { MedicineInventoryDetailDrawer } from '../../components/inventory/MedicineInventoryDetailDrawer';
 import { Pagination } from '../../components/ui/Pagination';
@@ -633,7 +633,7 @@ export function InventoryPage() {
         } catch {
             /* ignore */
         }
-        navigate({ to: '/app/sell', search: {} as any });
+        navigate({ to: '/app/sell', params: {} as any, search: {} as any });
     };
 
     useEffect(() => {

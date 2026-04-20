@@ -34,7 +34,6 @@ export function formatPharmacistStock(
     med: Pick<Medicine, 'stock_quantity' | 'dosage_form' | 'unit' | 'units_per_package' | 'base_unit'>,
 ): string {
     const qty = Number(med.stock_quantity || 0);
-    const form = normalizeForm(med.dosage_form);
     const unitRaw = String(med.unit || med.base_unit || 'unit').trim();
     const unitLabel = unitRaw.toLowerCase();
 
