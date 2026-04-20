@@ -1,6 +1,7 @@
 import api from '../lib/api';
 import type {
     Batch,
+    OperationalBatchRow,
     Stock,
     Supplier,
     PaginatedResponse,
@@ -15,6 +16,25 @@ import { normalizePaginatedResponse } from './utils';
 export const inventoryService = {
     async getBatches(params?: { medicine_id?: number; facility_id?: number }): Promise<Batch[]> {
         const response = await api.get<{ data: Batch[] }>('/pharmacy/batches', { params });
+        return response.data.data;
+    },
+
+    async getOperationalBatches(params: {
+        facility_id: number;
+        medicine?: string;
+        batch?: string;
+        status?: 'all' | 'expired' | 'expiring_soon' | 'zero_stock' | 'blocked';
+        sort?:
+            | 'expiry_asc'
+            | 'expiry_desc'
+            | 'available_desc'
+            | 'available_asc'
+            | 'sellable_desc'
+            | 'movement_desc';
+    }): Promise<OperationalBatchRow[]> {
+        const response = await api.get<{ data: OperationalBatchRow[] }>('/pharmacy/batches/operational', {
+            params,
+        });
         return response.data.data;
     },
 

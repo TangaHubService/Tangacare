@@ -7,10 +7,6 @@ const InventoryPage = lazyNamed(
     () => import('../../pages/dashboard/InventoryPage'),
     'InventoryPage',
 );
-const MedicineDetailsPage = lazyNamed(
-    () => import('../../pages/dashboard/MedicineDetailsPage'),
-    'MedicineDetailsPage',
-);
 const BatchStockPage = lazyNamed(
     () => import('../../pages/dashboard/BatchStockPage'),
     'BatchStockPage',
@@ -61,18 +57,6 @@ export const createInventoryRoutes = (parentRoute: any) => {
             withRouteSuspense(
                 <RequirePermission permission={PERMISSIONS.INVENTORY_READ}>
                     <BatchStockPage />
-                </RequirePermission>,
-            ),
-        validateSearch: (search: Record<string, unknown>) => drawerSearchSchema.parse(search),
-    });
-
-    const medicineDetailsRoute = createRoute({
-        getParentRoute: () => parentRoute,
-        path: 'inventory/$medicineId',
-        component: () =>
-            withRouteSuspense(
-                <RequirePermission permission={PERMISSIONS.INVENTORY_READ}>
-                    <MedicineDetailsPage />
                 </RequirePermission>,
             ),
         validateSearch: (search: Record<string, unknown>) => drawerSearchSchema.parse(search),
@@ -149,7 +133,6 @@ export const createInventoryRoutes = (parentRoute: any) => {
 
     return [
         inventoryRoute,
-        medicineDetailsRoute,
         stockRoute,
         stockMovementsRoute,
         stocktakingRoute,

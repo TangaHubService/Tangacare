@@ -125,12 +125,18 @@ export class KPIController {
                 this.kpiService.getComprehensiveKPIs(facilityId, startOfMonthStr, today, organizationId),
             ]);
 
-            const [topMeds, categories, payments, expiryRisk, salesTrend] = await Promise.all([
+            const [topMeds, categories, payments, expiryRisk, salesTrend, insuranceSummary] = await Promise.all([
                 this.reportingService.getTopMedicinesByRevenue(facilityId, startOfMonthStr, today, organizationId),
                 this.reportingService.getCategoryPerformance(facilityId, startOfMonthStr, today, organizationId),
                 this.reportingService.getPaymentMethodSummary(facilityId, startOfMonthStr, today, organizationId),
                 this.reportingService.getExpiryRiskBuckets(facilityId, organizationId),
                 this.reportingService.getSalesTrends(facilityId, thirtyDaysAgoStr, today, organizationId),
+                this.reportingService.getInsuranceDashboardSummary(
+                    facilityId,
+                    startOfMonthStr,
+                    today,
+                    organizationId,
+                ),
             ]);
 
             ResponseUtil.success(
@@ -143,6 +149,7 @@ export class KPIController {
                     payments,
                     expiry_risk: expiryRisk,
                     sales_trend: salesTrend,
+                    insurance: insuranceSummary,
                 },
                 'Dashboard summary retrieved successfully',
             );

@@ -13,6 +13,7 @@ import {
     ChevronDown,
     AlertTriangle,
     BarChart3,
+    Shield,
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { pharmacyService } from '../../services/pharmacy.service';
@@ -284,6 +285,56 @@ export function OperationsTodayPage() {
                     </>
                 )}
             </div>
+
+            {canReadReports && dashboardSummary?.insurance && (
+                <div className="rounded-2xl border border-teal-200 dark:border-teal-900/40 bg-teal-50/40 dark:bg-teal-950/20 p-4 space-y-3">
+                    <div className="flex items-center gap-2">
+                        <Shield size={18} className="text-teal-600 dark:text-teal-400" />
+                        <h2 className="text-sm font-black uppercase tracking-widest text-teal-800 dark:text-teal-200">
+                            Insurance (this month)
+                        </h2>
+                        <Link
+                            to="/app/insurance"
+                            search={{} as any}
+                            className="ml-auto text-xs font-bold text-teal-700 dark:text-teal-300 inline-flex items-center gap-1"
+                        >
+                            Manage claims <ArrowRight size={12} />
+                        </Link>
+                    </div>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+                        <div className="rounded-xl bg-white/80 dark:bg-slate-900/50 border border-teal-100 dark:border-teal-900/30 p-3">
+                            <p className="text-[10px] font-black text-slate-400 uppercase">Open claims</p>
+                            <p className="text-lg font-black text-healthcare-dark dark:text-white">
+                                {dashboardSummary.insurance.open_claims_count}
+                            </p>
+                            <p className="text-xs text-slate-500 font-medium">
+                                {formatMoney(dashboardSummary.insurance.open_claims_expected_total)} expected
+                            </p>
+                        </div>
+                        <div className="rounded-xl bg-white/80 dark:bg-slate-900/50 border border-teal-100 dark:border-teal-900/30 p-3">
+                            <p className="text-[10px] font-black text-slate-400 uppercase">Patient cash (sales)</p>
+                            <p className="text-lg font-black text-healthcare-dark dark:text-white">
+                                {formatMoney(dashboardSummary.insurance.sales_patient_paid_total)}
+                            </p>
+                            <p className="text-xs text-slate-500 font-medium">Co-pays & non-insurance tenders</p>
+                        </div>
+                        <div className="rounded-xl bg-white/80 dark:bg-slate-900/50 border border-teal-100 dark:border-teal-900/30 p-3">
+                            <p className="text-[10px] font-black text-slate-400 uppercase">Rejected</p>
+                            <p className="text-lg font-black text-rose-600 dark:text-rose-400">
+                                {dashboardSummary.insurance.rejected_claims_count}
+                            </p>
+                            <p className="text-xs text-slate-500 font-medium">Claims declined</p>
+                        </div>
+                        <div className="rounded-xl bg-white/80 dark:bg-slate-900/50 border border-amber-100 dark:border-amber-900/30 p-3">
+                            <p className="text-[10px] font-black text-slate-400 uppercase">Stale pending</p>
+                            <p className="text-lg font-black text-amber-700 dark:text-amber-300">
+                                {dashboardSummary.insurance.stale_pending_claims_count}
+                            </p>
+                            <p className="text-xs text-slate-500 font-medium">&gt; 30 days unsubmitted / pending</p>
+                        </div>
+                    </div>
+                </div>
+            )}
 
             {canReadAlerts && (
                 <div className="rounded-2xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900/30 overflow-hidden">

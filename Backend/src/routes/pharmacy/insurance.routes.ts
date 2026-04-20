@@ -33,6 +33,15 @@ router.put(
     insuranceController.updateProvider,
 );
 
+router.get(
+    '/summary',
+    authenticate,
+    requireFacilityScope,
+    authorize(UserRole.PHARMACIST, UserRole.FACILITY_ADMIN, UserRole.SUPER_ADMIN, UserRole.AUDITOR),
+    scopeMiddleware,
+    insuranceController.getInsuranceSummary,
+);
+
 // Claims
 router.get(
     '/claims',

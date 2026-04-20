@@ -807,6 +807,11 @@ export function InsurancePage() {
                                                         Policy:{' '}
                                                         {c.patient_insurance_number || 'N/A'}
                                                     </p>
+                                                    {c.claim_number && (
+                                                        <p className="text-[10px] font-bold text-slate-500">
+                                                            Ref: {c.claim_number}
+                                                        </p>
+                                                    )}
                                                 </div>
                                             </td>
                                             <td className="px-6 py-4">
@@ -833,6 +838,11 @@ export function InsurancePage() {
                                                 <p className="text-[10px] text-slate-400">
                                                     Total: {c.total_amount.toLocaleString()}
                                                 </p>
+                                                {Number(c.approved_amount) > 0 && (
+                                                    <p className="text-[10px] text-emerald-600 font-bold mt-0.5">
+                                                        Approved: {Number(c.approved_amount).toLocaleString()} RWF
+                                                    </p>
+                                                )}
                                             </td>
                                             <td className="px-6 py-4">
                                                 <span className="text-xs font-bold text-orange-600">
@@ -857,6 +867,11 @@ export function InsurancePage() {
                                                 >
                                                     {c.status}
                                                 </span>
+                                                {c.status === 'rejected' && c.rejection_reason && (
+                                                    <p className="text-[10px] text-red-600 mt-1 max-w-[200px] leading-snug">
+                                                        {c.rejection_reason}
+                                                    </p>
+                                                )}
                                             </td>
                                             <td className="px-6 py-4 text-right">
                                                 <div className="flex justify-end gap-1">

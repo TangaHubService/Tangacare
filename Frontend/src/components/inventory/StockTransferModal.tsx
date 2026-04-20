@@ -16,6 +16,8 @@ interface StockTransferModalProps {
     facilityId: number;
     onClose: () => void;
     onSuccess: () => void;
+    /** When opening from batch workspace, pre-select this batch in the dropdown. */
+    initialBatchId?: number;
 }
 
 const transferSchema = yup.object({
@@ -32,6 +34,7 @@ export function StockTransferModal({
     facilityId,
     onClose,
     onSuccess,
+    initialBatchId,
 }: StockTransferModalProps) {
     const {} = useAuth();
     const [batches, setBatches] = useState<Batch[]>([]);
@@ -44,6 +47,7 @@ export function StockTransferModal({
         register,
         handleSubmit,
         watch,
+        setValue,
         formState: { errors },
     } = useForm({
         resolver: yupResolver(transferSchema),
@@ -51,6 +55,7 @@ export function StockTransferModal({
             quantity: 1,
             source_location_id: undefined,
             target_location_id: undefined,
+            batch_id: initialBatchId,
         },
     });
 
@@ -62,7 +67,7 @@ export function StockTransferModal({
             setLoadingData(true);
             try {
                 const [batchesData, departmentsData, locationsData] = await Promise.all([
-                    pharmacyService.getBatches({ medicine_id: medicine.id }),
+                    pharmacyService.getBatches({ medicine_id: medicine.id, facility_id: facilityId }),
                     pharmacyService.getDepartments({ facility_id: facilityId }),
                     pharmacyService.getStorageLocations({ facility_id: facilityId }),
                 ]);
@@ -72,6 +77,9 @@ export function StockTransferModal({
                 );
 
                 setBatches(activeBatches);
+                if (initialBatchId && activeBatches.some((b) => b.id === initialBatchId)) {
+                    setValue('batch_id', initialBatchId);
+                }
                 setDepartments(departmentsData || []);
                 setStorageLocations((locationsData || []).filter((l) => l.is_active));
             } catch (error) {
@@ -82,7 +90,7 @@ export function StockTransferModal({
             }
         };
         loadData();
-    }, [medicine.id, facilityId]);
+    }, [medicine.id, facilityId, initialBatchId, setValue]);
 
     const onSubmit = async (data: any) => {
         if (!selectedBatch) return;

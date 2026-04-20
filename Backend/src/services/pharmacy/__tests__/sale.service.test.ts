@@ -7,8 +7,17 @@ import { Stock } from '../../../entities/Stock.entity';
 import { Batch } from '../../../entities/Batch.entity';
 import { Sale } from '../../../entities/Sale.entity';
 import { User } from '../../../entities/User.entity';
+import { InsuranceProvider } from '../../../entities/InsuranceProvider.entity';
+
+const mockInsuranceCreateClaim = jest.fn().mockResolvedValue({ id: 1 });
 
 // Mock dependencies
+jest.mock('../insurance.service', () => ({
+    InsuranceService: jest.fn().mockImplementation(() => ({
+        createClaim: (...args: unknown[]) => mockInsuranceCreateClaim(...args),
+    })),
+}));
+
 jest.mock('../../../config/database', () => ({
     AppDataSource: {
         transaction: jest.fn(),
@@ -119,7 +128,7 @@ describe('SaleService', () => {
                 if (entity === User) return mockUserRepo;
                 return {};
             }),
-            findOne: jest.fn(),
+            findOne: jest.fn().mockResolvedValue(null),
         };
 
         (AppDataSource.transaction as jest.Mock).mockImplementation(async (cb) => {
@@ -149,6 +158,7 @@ describe('SaleService', () => {
 
     afterEach(() => {
         jest.clearAllMocks();
+        mockInsuranceCreateClaim.mockClear();
     });
 
     describe('createSale', () => {
@@ -295,6 +305,117 @@ describe('SaleService', () => {
                 }),
             );
             expect(mockStockService.deductStockForSale).not.toHaveBeenCalled();
+        });
+
+        it('normalizes insurance split, creates one claim, and sets patient vs insurance amounts', async () => {
+            mockEntityManager.findOne.mockImplementation((entity: unknown) => {
+                if (entity === InsuranceProvider) {
+                    return Promise.resolve({
+                        id: 1,
+                        organization_id: 1,
+                        coverage_percentage: 80,
+                        max_coverage_limit: null,
+                    });
+                }
+                return Promise.resolve(null);
+            });
+
+            const insuranceDto: CreateSaleDto = {
+                patient_id: 1,
+                items: [{ medicine_id: 1, batch_id: 101, quantity: 2, unit_price: 500 }],
+                payments: [
+                    { method: 'insurance' as any, amount: 0 },
+                    { method: 'cash' as any, amount: 1000 },
+                ],
+                insurance_provider_id: 1,
+                patient_insurance_number: 'POL-1',
+                vat_rate: 0,
+                dispense_type: DispenseType.OTC,
+            };
+
+            mockBatchRepo.findOne.mockResolvedValue({
+                id: 101,
+                expiry_date: new Date(Date.now() + 10000000),
+                medicine: { name: 'Paracetamol', drug_schedule: 'unclassified' },
+            });
+            mockSaleRepo.create.mockReturnValue({ id: 1 });
+            mockSaleRepo.save.mockResolvedValue({ id: 1 });
+            mockSaleItemRepo.create.mockReturnValue({});
+            mockSalePaymentRepo.create.mockReturnValue({});
+            mockSaleRepo.findOne.mockResolvedValue({ id: 1, status: 'paid' });
+
+            await saleService.createSale(insuranceDto, 1, 1, 1);
+
+            expect(mockInsuranceCreateClaim).toHaveBeenCalledTimes(1);
+            expect(mockInsuranceCreateClaim).toHaveBeenCalledWith(
+                expect.objectContaining({
+                    organization_id: 1,
+                    provider_id: 1,
+                    expected_amount: 800,
+                    copay_amount: 200,
+                    patient_insurance_number: 'POL-1',
+                }),
+            );
+            expect(mockSaleRepo.create).toHaveBeenCalledWith(
+                expect.objectContaining({
+                    patient_paid_amount: 200,
+                    insurance_expected_amount: 800,
+                    paid_amount: 1000,
+                    insurance_provider_id: 1,
+                }),
+            );
+        });
+
+        it('rejects more than one insurance payment line', async () => {
+            mockBatchRepo.findOne.mockResolvedValue({
+                id: 101,
+                expiry_date: new Date(Date.now() + 10000000),
+                medicine: { name: 'Paracetamol', drug_schedule: 'unclassified' },
+            });
+            const bad: CreateSaleDto = {
+                ...validSaleDto,
+                payments: [
+                    { method: 'insurance' as any, amount: 100 },
+                    { method: 'insurance' as any, amount: 200 },
+                ],
+                insurance_provider_id: 1,
+            };
+            await expect(saleService.createSale(bad as any, 1, 1, 1)).rejects.toThrow(
+                /Only one insurance payment line/,
+            );
+        });
+
+        it('rejects insurance provider from another organization', async () => {
+            mockEntityManager.findOne.mockImplementation((entity: unknown) => {
+                if (entity === InsuranceProvider) {
+                    return Promise.resolve({
+                        id: 1,
+                        organization_id: 99,
+                        coverage_percentage: 80,
+                        max_coverage_limit: null,
+                    });
+                }
+                return Promise.resolve(null);
+            });
+            mockBatchRepo.findOne.mockResolvedValue({
+                id: 101,
+                expiry_date: new Date(Date.now() + 10000000),
+                medicine: { name: 'Paracetamol', drug_schedule: 'unclassified' },
+            });
+            const dto: CreateSaleDto = {
+                patient_id: 1,
+                items: [{ medicine_id: 1, batch_id: 101, quantity: 2, unit_price: 500 }],
+                payments: [
+                    { method: 'insurance' as any, amount: 0 },
+                    { method: 'cash' as any, amount: 1000 },
+                ],
+                insurance_provider_id: 1,
+                vat_rate: 0,
+                dispense_type: DispenseType.OTC,
+            };
+            await expect(saleService.createSale(dto, 1, 1, 1)).rejects.toThrow(
+                /not available for this organization/,
+            );
         });
 
         it('returns a COGS warning when unit cost resolves to 0', async () => {

@@ -1496,6 +1496,11 @@ export class StockAdjustmentDto {
     @IsInt()
     batch_id: number;
 
+    /** When set, adjustment targets this stock row (must belong to batch_id in this facility). */
+    @IsInt()
+    @IsOptional()
+    stock_id?: number;
+
     @IsInt()
     @IsOptional()
     department_id?: number;
@@ -1755,6 +1760,10 @@ export class CreateInsuranceClaimDto {
 
     @IsString()
     @IsOptional()
+    claim_number?: string;
+
+    @IsString()
+    @IsOptional()
     patient_insurance_number?: string;
 
     @IsNumber()
@@ -1794,6 +1803,19 @@ export class UpdateInsuranceClaimDto {
     @Min(0)
     @IsOptional()
     actual_received_amount?: number;
+
+    @IsNumber()
+    @Min(0)
+    @IsOptional()
+    approved_amount?: number;
+
+    @IsString()
+    @IsOptional()
+    rejection_reason?: string;
+
+    @IsString()
+    @IsOptional()
+    claim_number?: string;
 
     @IsString()
     @IsOptional()

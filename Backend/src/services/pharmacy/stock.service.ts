@@ -294,7 +294,16 @@ export class StockService {
         return await queryBuilder.getMany();
     }
 
-    async findStockByBatch(facilityId: number, organizationId: number, batchId: number, departmentId: number | null): Promise<Stock | null> {
+    /**
+     * All non-deleted stock lines for a batch in the facility (optionally scoped by department).
+     * Ordered for adjustments: largest non-reserved on-hand first so decreases align with aggregated UI totals.
+     */
+    async findStocksByBatchForAdjustment(
+        facilityId: number,
+        organizationId: number,
+        batchId: number,
+        departmentId: number | null,
+    ): Promise<Stock[]> {
         const queryBuilder = this.stockRepository
             .createQueryBuilder('stock')
             .where('stock.facility_id = :facilityId', { facilityId })
@@ -308,7 +317,92 @@ export class StockService {
             queryBuilder.andWhere('stock.department_id = :departmentId', { departmentId });
         }
 
-        return await queryBuilder.getOne();
+        const rows = await queryBuilder.orderBy('stock.id', 'ASC').getMany();
+        rows.sort((a, b) => {
+            const avA = a.quantity - (a.reserved_quantity || 0);
+            const avB = b.quantity - (b.reserved_quantity || 0);
+            if (avB !== avA) {
+                return avB - avA;
+            }
+            return a.id - b.id;
+        });
+        return rows;
+    }
+
+    async findStockForAdjustmentById(
+        facilityId: number,
+        organizationId: number,
+        batchId: number,
+        stockId: number,
+    ): Promise<Stock | null> {
+        return await this.stockRepository.findOne({
+            where: {
+                id: stockId,
+                facility_id: facilityId,
+                organization_id: organizationId,
+                batch_id: batchId,
+                is_deleted: false,
+            },
+        });
+    }
+
+    /**
+     * Apply a net quantity change across one or more stock rows (same batch). Used when the facility
+     * holds the same batch in multiple locations: avoids TypeORM getOne() errors and matches SUM(quantity) UX.
+     */
+    async adjustStockDistributed(
+        stocks: Stock[],
+        organizationId: number,
+        delta: number,
+        metadata: StockMovementMetadata,
+    ): Promise<Stock> {
+        if (!stocks.length) {
+            throw new AppError('Stock not found for this batch', 404);
+        }
+        if (delta === 0) {
+            return stocks[0];
+        }
+
+        const sorted = [...stocks].sort((a, b) => {
+            const avA = a.quantity - (a.reserved_quantity || 0);
+            const avB = b.quantity - (b.reserved_quantity || 0);
+            if (avB !== avA) {
+                return avB - avA;
+            }
+            return a.id - b.id;
+        });
+
+        if (delta > 0) {
+            const target = sorted[0];
+            return await this.adjustStock(target.id, organizationId, target.quantity + delta, metadata);
+        }
+
+        let remaining = -delta;
+        let lastUpdated: Stock | null = null;
+        for (const s of sorted) {
+            if (remaining <= 0) {
+                break;
+            }
+            const reserved = s.reserved_quantity || 0;
+            const maxRemovable = Math.max(0, s.quantity - reserved);
+            if (maxRemovable <= 0) {
+                continue;
+            }
+            const take = Math.min(maxRemovable, remaining);
+            if (take <= 0) {
+                continue;
+            }
+            lastUpdated = await this.adjustStock(s.id, organizationId, s.quantity - take, metadata);
+            remaining -= take;
+        }
+
+        if (remaining > 0) {
+            throw new AppError('Insufficient non-reserved stock for this adjustment', 400);
+        }
+        if (!lastUpdated) {
+            throw new AppError('No stock line could be adjusted', 400);
+        }
+        return lastUpdated;
     }
 
     async findSourceStockForTransfer(

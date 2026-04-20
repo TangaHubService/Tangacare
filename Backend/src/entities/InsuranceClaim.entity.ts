@@ -36,6 +36,9 @@ export class InsuranceClaim {
     @Column({ type: 'int', nullable: true })
     organization_id: number;
 
+    @Column({ type: 'varchar', length: 100, nullable: true })
+    claim_number: string;
+
     @Column({ type: 'int' })
     provider_id: number;
 
@@ -57,12 +60,19 @@ export class InsuranceClaim {
     @Column({ type: 'decimal', precision: 10, scale: 2, default: 0 })
     actual_received_amount: number;
 
+    /** Amount approved by insurer (may differ from expected before payment is received). */
+    @Column({ type: 'decimal', precision: 10, scale: 2, default: 0 })
+    approved_amount: number;
+
     @Column({
         type: 'enum',
         enum: InsuranceClaimStatus,
         default: InsuranceClaimStatus.PENDING,
     })
     status: InsuranceClaimStatus;
+
+    @Column({ type: 'text', nullable: true })
+    rejection_reason: string;
 
     @Column({ type: 'text', nullable: true })
     notes: string;

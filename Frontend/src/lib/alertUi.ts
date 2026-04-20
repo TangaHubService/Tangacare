@@ -151,9 +151,9 @@ export function getAlertActionTarget(alert: Alert): AlertActionTarget | null {
         case 'controlled_drug_threshold':
             return alert.medicine_id
                 ? {
-                      label: 'Open Medicine Detail',
-                      to: `/app/inventory/${alert.medicine_id}`,
-                      description: 'Inspect current stock, batches, and movement context for this medicine.',
+                      label: 'Open inventory',
+                      to: '/app/inventory',
+                      description: 'Find the medicine in inventory and open its detail drawer from the list.',
                   }
                 : {
                       label: 'Open Stock Workspace',

@@ -13,13 +13,15 @@ import {
 import { useAuth } from '../../context/AuthContext';
 import { Drawer } from '../ui/Drawer';
 
+type UiAdjustmentType = 'increase' | 'decrease' | 'damage' | 'expired' | 'return';
+
 interface StockAdjustmentModalProps {
     batch: Batch;
     onClose: () => void;
     onSuccess: () => void;
+    /** When opening from batch workspace shortcuts (e.g. mark expired). */
+    initialAdjustmentType?: UiAdjustmentType;
 }
-
-type UiAdjustmentType = 'increase' | 'decrease' | 'damage' | 'expired' | 'return';
 
 type UiAdjustmentReason = 'correction' | 'damage' | 'expiry' | 'loss' | 'customer_return';
 
@@ -41,7 +43,12 @@ const adjustmentSchema = yup.object({
     notes: yup.string().required('Notes are required').min(5, 'Notes must be detailed'),
 });
 
-export function StockAdjustmentModal({ batch, onClose, onSuccess }: StockAdjustmentModalProps) {
+export function StockAdjustmentModal({
+    batch,
+    onClose,
+    onSuccess,
+    initialAdjustmentType,
+}: StockAdjustmentModalProps) {
     const { user } = useAuth();
     const [isLoading, setIsLoading] = useState(false);
     const [highRiskConfirmed, setHighRiskConfirmed] = useState(false);
@@ -55,7 +62,7 @@ export function StockAdjustmentModal({ batch, onClose, onSuccess }: StockAdjustm
     } = useForm({
         resolver: yupResolver(adjustmentSchema),
         defaultValues: {
-            type: 'decrease',
+            type: initialAdjustmentType || 'decrease',
             reason: 'correction',
             quantity: 1,
         },
@@ -71,6 +78,14 @@ export function StockAdjustmentModal({ batch, onClose, onSuccess }: StockAdjustm
         }
         setHighRiskConfirmed(false);
     }, [adjustmentType, setValue]);
+
+    useEffect(() => {
+        if (!initialAdjustmentType) return;
+        setValue('type', initialAdjustmentType);
+        const r = reasonByType[initialAdjustmentType];
+        if (r) setValue('reason', r);
+        setHighRiskConfirmed(false);
+    }, [batch.id, initialAdjustmentType, setValue]);
 
     const stockPreview = useMemo(() => {
         const decreasesStock = ['decrease', 'damage', 'expired'].includes(adjustmentType);

@@ -1,5 +1,5 @@
 import api from '../lib/api';
-import type { InsuranceProvider, InsuranceClaim } from '../types/pharmacy';
+import type { InsuranceProvider, InsuranceClaim, InsuranceDashboardSummary } from '../types/pharmacy';
 
 export const insuranceService = {
     async getInsuranceProviders(): Promise<InsuranceProvider[]> {
@@ -40,6 +40,11 @@ export const insuranceService = {
 
     async createInsuranceClaim(data: Partial<InsuranceClaim>): Promise<InsuranceClaim> {
         const response = await api.post<any>('/pharmacy/insurance/claims', data);
+        return (response.data as any).data ?? response.data;
+    },
+
+    async getInsuranceSummary(params: { start_date: string; end_date: string }): Promise<InsuranceDashboardSummary> {
+        const response = await api.get<any>('/pharmacy/insurance/summary', { params });
         return (response.data as any).data ?? response.data;
     },
 };

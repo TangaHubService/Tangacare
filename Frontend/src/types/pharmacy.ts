@@ -234,6 +234,38 @@ export interface Batch {
     location?: StorageLocation | null;
 }
 
+/** Facility batch execution row from `GET /pharmacy/batches/operational`. */
+export type OperationalBatchStatus =
+    | 'EXPIRED'
+    | 'EXPIRING_SOON'
+    | 'OUT_OF_STOCK'
+    | 'LOW_BATCH_STOCK'
+    | 'BLOCKED'
+    | 'ACTIVE';
+
+export interface OperationalBatchRow {
+    batchId: number;
+    medicineId: number;
+    medicineName: string;
+    batchNumber: string;
+    expiryDate: string;
+    daysToExpiry: number | null;
+    availableQty: number;
+    reservedQty: number;
+    sellableQty: number;
+    batchStatus: OperationalBatchStatus;
+    isExpired: boolean;
+    isExpiringSoon: boolean;
+    isOutOfStock: boolean;
+    isBlocked: boolean;
+    isFefoCandidate: boolean;
+    locationName: string | null;
+    lastMovementAt: string | null;
+    unitCost: number | null;
+    unitPrice: number | null;
+    controlledDrug: boolean;
+}
+
 export interface Stock {
     id: number;
     facility_id: number;
@@ -603,6 +635,13 @@ export interface SaleItem {
     created_at?: string;
 }
 
+export type InsurancePaymentStatus =
+    | 'none'
+    | 'pending_receipt'
+    | 'partially_received'
+    | 'received'
+    | 'insurance_declined';
+
 export interface Sale {
     id: number;
     sale_number: string;
@@ -617,6 +656,12 @@ export interface Sale {
     total_amount: number;
     paid_amount: number;
     balance_amount: number;
+    /** Non-insurance tenders collected at POS */
+    patient_paid_amount?: number;
+    /** Expected insurer portion */
+    insurance_expected_amount?: number;
+    insurance_provider_id?: number | null;
+    insurance_payment_status?: InsurancePaymentStatus;
     status: SaleStatus;
     created_at?: string;
     items?: SaleItem[];
@@ -1033,6 +1078,23 @@ export interface CategorySummary {
     profit: number;
 }
 
+export interface InsuranceDashboardSummary {
+    period: { start: string; end: string };
+    open_claims_count: number;
+    open_claims_expected_total: number;
+    rejected_claims_count: number;
+    insurance_received_total: number;
+    sales_patient_paid_total: number;
+    sales_insurance_expected_total: number;
+    top_providers: Array<{
+        provider_id: number;
+        provider_name: string;
+        claims_count: number;
+        expected_total: number;
+    }>;
+    stale_pending_claims_count: number;
+}
+
 export interface DashboardSummary {
     today: ComprehensiveKPIs;
     month: ComprehensiveKPIs;
@@ -1046,6 +1108,7 @@ export interface DashboardSummary {
         /** Purchase receiving value (goods receipts), same period as sales */
         received?: number;
     }>;
+    insurance?: InsuranceDashboardSummary;
 }
 
 export interface GlobalSearchResultItem {
@@ -1150,6 +1213,7 @@ export interface StockVariance {
 
 export interface InsuranceProvider {
     id: number;
+    organization_id?: number | null;
     name: string;
     type: 'PUBLIC' | 'PRIVATE';
     coverage_percentage: number;
@@ -1172,12 +1236,15 @@ export interface InsuranceClaim {
     sale?: Sale;
     provider_id: number;
     provider?: InsuranceProvider;
+    claim_number?: string | null;
     patient_insurance_number?: string;
     total_amount: number;
     applied_coverage_percentage: number;
     expected_amount: number;
     copay_amount: number;
     actual_received_amount: number;
+    approved_amount?: number;
+    rejection_reason?: string | null;
     status: InsuranceClaimStatus;
     notes?: string;
     submitted_at?: string;

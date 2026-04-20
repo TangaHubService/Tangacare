@@ -10,7 +10,7 @@ export interface PharmacyGlobalSearchHit {
     id: string;
     label: string;
     meta: string;
-    /** UI route path without origin, e.g. /app/inventory/1 */
+    /** UI route path without origin, e.g. /app/inventory */
     to: string;
     group: 'medicines' | 'batches' | 'suppliers' | 'purchaseOrders' | 'stockMovements';
 }
@@ -95,7 +95,7 @@ export class PharmacyGlobalSearchService {
             id: String(m.id),
             label: String(m.name || 'Medicine'),
             meta: String(m.generic_name || m.code || m.category?.name || 'Medicine'),
-            to: `/app/inventory/${m.id}`,
+            to: '/app/inventory',
             group: 'medicines',
         }));
 

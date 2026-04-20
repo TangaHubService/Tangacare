@@ -1,4 +1,14 @@
-import { Entity, PrimaryGeneratedColumn, Column, CreateDateColumn, UpdateDateColumn } from 'typeorm';
+import {
+    Entity,
+    PrimaryGeneratedColumn,
+    Column,
+    CreateDateColumn,
+    UpdateDateColumn,
+    ManyToOne,
+    JoinColumn,
+    Index,
+} from 'typeorm';
+import { Organization } from './Organization.entity';
 
 export enum InsuranceProviderType {
     PUBLIC = 'PUBLIC',
@@ -6,9 +16,13 @@ export enum InsuranceProviderType {
 }
 
 @Entity('insurance_providers')
+@Index(['organization_id', 'name'])
 export class InsuranceProvider {
     @PrimaryGeneratedColumn()
     id: number;
+
+    @Column({ type: 'int', nullable: true })
+    organization_id: number;
 
     @Column({ type: 'varchar', length: 100 })
     name: string;
@@ -34,4 +48,8 @@ export class InsuranceProvider {
 
     @UpdateDateColumn({ type: 'timestamp with time zone' })
     updated_at: Date;
+
+    @ManyToOne(() => Organization, { nullable: true, onDelete: 'SET NULL' })
+    @JoinColumn({ name: 'organization_id' })
+    organization: Organization;
 }

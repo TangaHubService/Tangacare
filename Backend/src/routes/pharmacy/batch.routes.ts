@@ -22,6 +22,8 @@ router.get('/', authenticate, scopeMiddleware, batchController.findAll);
 
 router.get('/expiring', authenticate, scopeMiddleware, batchController.getExpiring);
 
+router.get('/operational', authenticate, scopeMiddleware, batchController.findOperational);
+
 router.get('/:id', authenticate, scopeMiddleware, batchController.findOne);
 
 router.put(

@@ -46,12 +46,25 @@ const STOCK_MOVEMENT_ROLE_DEFAULT_COLUMNS: Record<string, string[]> = {
 
 type MovementSort = 'latest' | 'oldest' | 'qty_desc' | 'qty_asc';
 
+const STOCK_MOVEMENTS_PREFILL = 'tangacare.stockMovements.prefillSearch';
+
 export function StockMovementsPage() {
     const { user, facilityId } = useAuth();
     const fid = facilityId ?? user?.facility_id;
     const [startDate, setStartDate] = useState('');
     const [endDate, setEndDate] = useState('');
     const [searchTerm, setSearchTerm] = useState('');
+
+    useEffect(() => {
+        try {
+            const pre = sessionStorage.getItem(STOCK_MOVEMENTS_PREFILL);
+            if (!pre) return;
+            sessionStorage.removeItem(STOCK_MOVEMENTS_PREFILL);
+            setSearchTerm(pre);
+        } catch {
+            /* ignore */
+        }
+    }, []);
     const [movementTypeFilter, setMovementTypeFilter] = useState('all');
     const [userFilter, setUserFilter] = useState('all');
     const [sortBy, setSortBy] = useState<MovementSort>('latest');

@@ -2,21 +2,25 @@ import { Request, Response } from 'express';
 import { ResponseUtil } from '../../utils/response.util';
 import { InsuranceProviderService } from '../../services/pharmacy/insurance-provider.service';
 import { InsuranceService } from '../../services/pharmacy/insurance.service';
-import { resolveFacilityId } from '../../utils/request.util';
+import { ReportingService } from '../../services/pharmacy/reporting.service';
+import { resolveFacilityId, resolveOrganizationId } from '../../utils/request.util';
 
 export class InsuranceController {
     private providerService: InsuranceProviderService;
     private insuranceService: InsuranceService;
+    private reportingService: ReportingService;
 
     constructor() {
         this.providerService = new InsuranceProviderService();
         this.insuranceService = new InsuranceService();
+        this.reportingService = new ReportingService();
     }
 
     // Provider Endpoints
-    findAllProviders = async (_req: Request, res: Response): Promise<void> => {
+    findAllProviders = async (req: Request, res: Response): Promise<void> => {
         try {
-            const providers = await this.providerService.findAll();
+            const organizationId = resolveOrganizationId(req);
+            const providers = await this.providerService.findAll(organizationId);
             ResponseUtil.success(res, providers, 'Insurance providers retrieved successfully');
         } catch (error: any) {
             ResponseUtil.internalError(res, 'Failed to fetch insurance providers', error.message);
@@ -25,7 +29,12 @@ export class InsuranceController {
 
     createProvider = async (req: Request, res: Response): Promise<void> => {
         try {
-            const provider = await this.providerService.create(req.body);
+            const organizationId = resolveOrganizationId(req);
+            if (!organizationId) {
+                ResponseUtil.badRequest(res, 'Organization context is required to create an insurance provider');
+                return;
+            }
+            const provider = await this.providerService.create(req.body, organizationId);
             ResponseUtil.success(res, provider, 'Insurance provider created successfully', 201);
         } catch (error: any) {
             if (error?.statusCode) {
@@ -39,7 +48,8 @@ export class InsuranceController {
     updateProvider = async (req: Request, res: Response): Promise<void> => {
         try {
             const id = parseInt(req.params.id, 10);
-            const provider = await this.providerService.update(id, req.body);
+            const organizationId = resolveOrganizationId(req);
+            const provider = await this.providerService.update(id, req.body, organizationId);
             ResponseUtil.success(res, provider, 'Insurance provider updated successfully');
         } catch (error: any) {
             if (error?.statusCode) {
@@ -47,6 +57,32 @@ export class InsuranceController {
                 return;
             }
             ResponseUtil.internalError(res, 'Failed to update insurance provider', error.message);
+        }
+    };
+
+    getInsuranceSummary = async (req: Request, res: Response): Promise<void> => {
+        try {
+            const facilityId = resolveFacilityId(req);
+            const organizationId = resolveOrganizationId(req);
+            if (!facilityId && !organizationId) {
+                ResponseUtil.badRequest(res, 'Facility ID or Organization ID is required');
+                return;
+            }
+            const startDate = req.query.start_date as string;
+            const endDate = req.query.end_date as string;
+            if (!startDate || !endDate) {
+                ResponseUtil.badRequest(res, 'start_date and end_date are required');
+                return;
+            }
+            const summary = await this.reportingService.getInsuranceDashboardSummary(
+                facilityId,
+                startDate,
+                endDate,
+                organizationId,
+            );
+            ResponseUtil.success(res, summary, 'Insurance summary retrieved successfully');
+        } catch (error: any) {
+            ResponseUtil.internalError(res, 'Failed to fetch insurance summary', error.message);
         }
     };
 

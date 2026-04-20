@@ -17,6 +17,7 @@ import { Batch } from './Batch.entity';
 import { Prescription } from './Prescription.entity';
 import { InsuranceClaim } from './InsuranceClaim.entity';
 import { Organization } from './Organization.entity';
+import { InsuranceProvider } from './InsuranceProvider.entity';
 
 export enum SaleStatus {
     PAID = 'paid',
@@ -37,6 +38,16 @@ export enum FiscalStatus {
     PENDING = 'pending',
     SENT = 'sent',
     FAILED = 'failed',
+}
+
+/** Insurer remittance state for the insurance portion of a sale (cash co-pay is separate). */
+export enum InsurancePaymentStatus {
+    NONE = 'none',
+    PENDING_RECEIPT = 'pending_receipt',
+    PARTIALLY_RECEIVED = 'partially_received',
+    RECEIVED = 'received',
+    /** Insurer rejected or declined; AR may need write-off or patient collection. */
+    INSURANCE_DECLINED = 'insurance_declined',
 }
 
 @Entity('sales')
@@ -85,6 +96,20 @@ export class Sale {
     @Column({ type: 'decimal', precision: 10, scale: 2, default: 0 })
     balance_amount: number;
 
+    /** Sum of non-insurance tenders (cash, card, mobile_money, bank) — cash collected at POS. */
+    @Column({ type: 'decimal', precision: 10, scale: 2, default: 0 })
+    patient_paid_amount: number;
+
+    /** Expected insurer portion (sale_payments where method = insurance). */
+    @Column({ type: 'decimal', precision: 10, scale: 2, default: 0 })
+    insurance_expected_amount: number;
+
+    @Column({ type: 'int', nullable: true })
+    insurance_provider_id: number | null;
+
+    @Column({ type: 'varchar', length: 32, default: InsurancePaymentStatus.NONE })
+    insurance_payment_status: InsurancePaymentStatus;
+
     @Column({
         type: 'enum',
         enum: SaleStatus,
@@ -125,6 +150,10 @@ export class Sale {
     @ManyToOne(() => User, { onDelete: 'CASCADE' })
     @JoinColumn({ name: 'cashier_id' })
     cashier: User;
+
+    @ManyToOne(() => InsuranceProvider, { nullable: true, onDelete: 'SET NULL' })
+    @JoinColumn({ name: 'insurance_provider_id' })
+    insurance_provider: InsuranceProvider;
 
     @OneToMany(() => SaleItem, (item) => item.sale, { cascade: true })
     items: SaleItem[];

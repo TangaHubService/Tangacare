@@ -7,6 +7,7 @@ import { AuditService } from './audit.service';
 import { AuditAction, AuditEntityType } from '../../entities/AuditLog.entity';
 import { applyScope } from '../../utils/scope.util';
 import { AuthRequest } from '../../middleware/auth.middleware';
+import { Sale, InsurancePaymentStatus } from '../../entities/Sale.entity';
 
 
 export class InsuranceService {
@@ -20,6 +21,12 @@ export class InsuranceService {
     }
 
     async createClaim(data: Partial<InsuranceClaim>): Promise<InsuranceClaim> {
+        if (data.sale_id != null) {
+            const existing = await this.claimRepository.findOne({ where: { sale_id: data.sale_id } });
+            if (existing) {
+                throw new AppError('A claim already exists for this sale', 409);
+            }
+        }
         const claim = this.claimRepository.create(data);
         return await this.claimRepository.save(claim);
     }
@@ -59,11 +66,44 @@ export class InsuranceService {
             claim.actual_received_amount = dto.actual_received_amount;
         }
 
+        if (dto.approved_amount !== undefined) {
+            claim.approved_amount = dto.approved_amount;
+        }
+
+        if (dto.rejection_reason !== undefined) {
+            claim.rejection_reason = dto.rejection_reason;
+        }
+
+        if (dto.claim_number !== undefined) {
+            claim.claim_number = dto.claim_number;
+        }
+
         if (dto.notes !== undefined) {
             claim.notes = dto.notes;
         }
 
         const savedClaim = await this.claimRepository.save(claim);
+
+        const saleRepo = this.claimRepository.manager.getRepository(Sale);
+        const sale = await saleRepo.findOne({ where: { id: claim.sale_id } });
+        if (sale && Number(sale.insurance_expected_amount) > 0) {
+            if (savedClaim.status === InsuranceClaimStatus.PAID) {
+                sale.insurance_payment_status = InsurancePaymentStatus.RECEIVED;
+            } else if (savedClaim.status === InsuranceClaimStatus.PARTIALLY_APPROVED) {
+                sale.insurance_payment_status = InsurancePaymentStatus.PARTIALLY_RECEIVED;
+            } else if (savedClaim.status === InsuranceClaimStatus.REJECTED) {
+                sale.insurance_payment_status = InsurancePaymentStatus.INSURANCE_DECLINED;
+            } else if (
+                [
+                    InsuranceClaimStatus.PENDING,
+                    InsuranceClaimStatus.SUBMITTED,
+                    InsuranceClaimStatus.APPROVED,
+                ].includes(savedClaim.status)
+            ) {
+                sale.insurance_payment_status = InsurancePaymentStatus.PENDING_RECEIPT;
+            }
+            await saleRepo.save(sale);
+        }
 
         // Audit Log
         await this.auditService.log({

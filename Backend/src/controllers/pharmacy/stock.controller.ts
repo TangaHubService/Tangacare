@@ -66,27 +66,64 @@ export class StockController {
 
             const departmentId = dto.department_id ?? null;
 
-            const stock = await this.stockService.findStockByBatch(facilityId, organizationId, dto.batch_id, departmentId);
-            if (!stock) {
+            let stocks: Awaited<ReturnType<StockService['findStocksByBatchForAdjustment']>>;
+            if (dto.stock_id != null) {
+                const one = await this.stockService.findStockForAdjustmentById(
+                    facilityId,
+                    organizationId,
+                    dto.batch_id,
+                    dto.stock_id,
+                );
+                if (!one) {
+                    ResponseUtil.notFound(res, 'Stock not found for this batch');
+                    return;
+                }
+                stocks = [one];
+            } else {
+                stocks = await this.stockService.findStocksByBatchForAdjustment(
+                    facilityId,
+                    organizationId,
+                    dto.batch_id,
+                    departmentId,
+                );
+            }
+
+            if (!stocks.length) {
                 ResponseUtil.notFound(res, 'Stock not found for this batch');
                 return;
             }
 
             const delta = dto.type === 'increase' || dto.type === 'return' ? dto.quantity : -dto.quantity;
-            const newQty = stock.quantity + delta;
-            if (newQty < 0) {
+            const totalQty = stocks.reduce((sum, s) => sum + s.quantity, 0);
+            if (totalQty + delta < 0) {
                 ResponseUtil.badRequest(res, 'Adjustment would make stock negative');
                 return;
             }
 
-            const updated = await this.stockService.adjustStock(stock.id, organizationId, newQty, {
+            if (delta < 0) {
+                const maxRemovable = stocks.reduce(
+                    (sum, s) => sum + Math.max(0, s.quantity - (s.reserved_quantity || 0)),
+                    0,
+                );
+                if (-delta > maxRemovable) {
+                    ResponseUtil.badRequest(res, 'Cannot reduce below reserved quantities across stock lines');
+                    return;
+                }
+            }
+
+            const metadata = {
                 type: dto.type === 'return' ? StockMovementType.RETURN : StockMovementType.ADJUSTMENT,
                 reason: dto.reason,
                 notes: dto.notes || `Stock adjustment: ${dto.type}`,
                 user_id: userId,
                 reference_type: 'STOCK_ADJUSTMENT',
                 reference_id: dto.batch_id,
-            });
+            };
+
+            const updated =
+                stocks.length === 1
+                    ? await this.stockService.adjustStock(stocks[0].id, organizationId, stocks[0].quantity + delta, metadata)
+                    : await this.stockService.adjustStockDistributed(stocks, organizationId, delta, metadata);
 
             await this.auditService.log({
                 facility_id: facilityId,
@@ -96,8 +133,13 @@ export class StockController {
                 entity_id: updated.id,
                 entity_name: `Stock ${updated.id}`,
                 description: `Stock adjustment (${dto.type}): batch ${dto.batch_id}, qty ${dto.quantity}. Reason: ${dto.reason}`,
-                old_values: { quantity: stock.quantity },
-                new_values: { quantity: updated.quantity, type: dto.type, reason: dto.reason },
+                old_values: { total_quantity: totalQty, stock_lines: stocks.length },
+                new_values: {
+                    total_quantity: totalQty + delta,
+                    representative_stock_id: updated.id,
+                    type: dto.type,
+                    reason: dto.reason,
+                },
             });
 
             ResponseUtil.success(res, updated, 'Stock adjusted successfully');

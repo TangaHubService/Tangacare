@@ -34,6 +34,54 @@ export class BatchController {
         }
     };
 
+    findOperational = async (req: Request, res: Response): Promise<void> => {
+        try {
+            const facilityId = resolveFacilityId(req);
+            const organizationId = (req as any).user?.organizationId;
+            if (!organizationId) {
+                ResponseUtil.error(res, 'Organization context missing', 400);
+                return;
+            }
+            if (!facilityId) {
+                ResponseUtil.error(res, 'Facility is required for batch operations', 400);
+                return;
+            }
+            const medicine = typeof req.query.medicine === 'string' ? req.query.medicine : undefined;
+            const batch = typeof req.query.batch === 'string' ? req.query.batch : undefined;
+            const status = (req.query.status as string) || 'all';
+            const sort = (req.query.sort as string) || 'expiry_asc';
+            const allowedStatus = ['all', 'expired', 'expiring_soon', 'zero_stock', 'blocked'].includes(status)
+                ? (status as 'all' | 'expired' | 'expiring_soon' | 'zero_stock' | 'blocked')
+                : 'all';
+            const allowedSort = [
+                'expiry_asc',
+                'expiry_desc',
+                'available_desc',
+                'available_asc',
+                'sellable_desc',
+                'movement_desc',
+            ].includes(sort)
+                ? (sort as
+                      | 'expiry_asc'
+                      | 'expiry_desc'
+                      | 'available_desc'
+                      | 'available_asc'
+                      | 'sellable_desc'
+                      | 'movement_desc')
+                : 'expiry_asc';
+
+            const result = await this.batchService.findOperationalBatches(organizationId, facilityId, {
+                medicine,
+                batch,
+                status: allowedStatus,
+                sort: allowedSort,
+            });
+            ResponseUtil.success(res, result, 'Operational batches retrieved successfully');
+        } catch (error: any) {
+            ResponseUtil.internalError(res, 'Failed to retrieve operational batches', error.message);
+        }
+    };
+
     findAll = async (req: Request, res: Response): Promise<void> => {
         try {
             const facilityId = resolveFacilityId(req);

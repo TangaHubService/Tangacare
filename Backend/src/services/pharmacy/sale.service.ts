@@ -2,12 +2,20 @@ import { Repository, EntityManager, Brackets } from 'typeorm';
 import PDFDocument from 'pdfkit';
 import { AppDataSource } from '../../config/database';
 import { AppError } from '../../middleware/error.middleware';
-import { Sale, SaleItem, SalePayment, SalePaymentMethod, SaleStatus } from '../../entities/Sale.entity';
+import {
+    Sale,
+    SaleItem,
+    SalePayment,
+    SalePaymentMethod,
+    SaleStatus,
+    InsurancePaymentStatus,
+} from '../../entities/Sale.entity';
 import { User, UserRole } from '../../entities/User.entity';
 import { Batch } from '../../entities/Batch.entity';
 import { DrugSchedule } from '../../entities/Medicine.entity';
 import { StockStatus } from '../../entities/Stock.entity';
 import { InsuranceProvider } from '../../entities/InsuranceProvider.entity';
+import { InsuranceClaimStatus } from '../../entities/InsuranceClaim.entity';
 import { CreateSaleDto } from '../../dto/pharmacy.dto';
 import { StockService } from './stock.service';
 import { AuditService } from './audit.service';
@@ -317,12 +325,113 @@ export class SaleService {
             const totalAmount = roundMoney(subtotal + vatAmount, decimals);
 
             const payments = createDto.payments || [];
-            const paidAmount = payments.reduce((sum, p) => sum + p.amount, 0);
-            const balanceAmount = totalAmount - paidAmount;
+            const insuranceLines = payments.filter((p) => p.method === SalePaymentMethod.INSURANCE);
+            if (insuranceLines.length > 1) {
+                throw new AppError('Only one insurance payment line is allowed per sale', 400);
+            }
 
+            let insuranceProvider: InsuranceProvider | null = null;
+            if (insuranceLines.length === 1) {
+                if (!createDto.insurance_provider_id) {
+                    throw new AppError('Insurance provider is required for insurance payments', 400);
+                }
+                insuranceProvider = await transactionalEntityManager.findOne(InsuranceProvider, {
+                    where: { id: createDto.insurance_provider_id },
+                });
+                if (!insuranceProvider) {
+                    throw new AppError('Insurance provider not found', 404);
+                }
+                if (
+                    insuranceProvider.organization_id != null &&
+                    insuranceProvider.organization_id !== organizationId
+                ) {
+                    throw new AppError('Insurance provider is not available for this organization', 403);
+                }
+            }
+
+            type NormalizedPayment = {
+                method: SalePaymentMethod;
+                amount: number;
+                reference?: string;
+            };
+            const normalized: NormalizedPayment[] = [];
+            for (const p of payments) {
+                if (p.method === SalePaymentMethod.INSURANCE) {
+                    if (!insuranceProvider) {
+                        throw new AppError('Insurance provider is required for insurance payments', 400);
+                    }
+                    const coveragePercent = Number(insuranceProvider.coverage_percentage);
+                    let insAmt = (totalAmount * coveragePercent) / 100;
+                    if (
+                        insuranceProvider.max_coverage_limit != null &&
+                        insAmt > Number(insuranceProvider.max_coverage_limit)
+                    ) {
+                        insAmt = Number(insuranceProvider.max_coverage_limit);
+                    }
+                    normalized.push({
+                        method: SalePaymentMethod.INSURANCE,
+                        amount: roundMoney(insAmt, decimals),
+                        reference: p.reference,
+                    });
+                } else {
+                    normalized.push({
+                        method: p.method as SalePaymentMethod,
+                        amount: roundMoney(Number(p.amount), decimals),
+                        reference: p.reference,
+                    });
+                }
+            }
+
+            let paidAmount = roundMoney(
+                normalized.reduce((sum, p) => sum + p.amount, 0),
+                decimals,
+            );
+            let roundingDiff = roundMoney(totalAmount - paidAmount, decimals);
+            if (roundingDiff !== 0) {
+                const idx = normalized.findIndex((p) => p.method !== SalePaymentMethod.INSURANCE);
+                if (idx < 0) {
+                    throw new AppError(
+                        'Payment total does not match sale total after insurance calculation',
+                        400,
+                    );
+                }
+                normalized[idx] = {
+                    ...normalized[idx],
+                    amount: roundMoney(normalized[idx].amount + roundingDiff, decimals),
+                };
+                paidAmount = roundMoney(
+                    normalized.reduce((sum, p) => sum + p.amount, 0),
+                    decimals,
+                );
+            }
+
+            const tolerance = decimals <= 0 ? 0.5 : 0.5 / 10 ** decimals;
+            if (Math.abs(paidAmount - totalAmount) > tolerance) {
+                throw new AppError('Payment amounts must equal the sale total', 400);
+            }
+
+            const patientPaidAmount = roundMoney(
+                normalized
+                    .filter((p) => p.method !== SalePaymentMethod.INSURANCE)
+                    .reduce((sum, p) => sum + p.amount, 0),
+                decimals,
+            );
+            const insuranceExpectedAmount = roundMoney(
+                normalized
+                    .filter((p) => p.method === SalePaymentMethod.INSURANCE)
+                    .reduce((sum, p) => sum + p.amount, 0),
+                decimals,
+            );
+
+            const balanceAmount = roundMoney(totalAmount - paidAmount, decimals);
             let status: SaleStatus = SaleStatus.UNPAID;
             if (paidAmount >= totalAmount) status = SaleStatus.PAID;
             else if (paidAmount > 0) status = SaleStatus.PARTIALLY_PAID;
+
+            const insurancePaymentStatus =
+                insuranceExpectedAmount > 0
+                    ? InsurancePaymentStatus.PENDING_RECEIPT
+                    : InsurancePaymentStatus.NONE;
 
             const saleNumber = await this.generateSaleNumber(facilityId);
 
@@ -340,6 +449,10 @@ export class SaleService {
                 total_amount: totalAmount,
                 paid_amount: paidAmount,
                 balance_amount: balanceAmount,
+                patient_paid_amount: patientPaidAmount,
+                insurance_expected_amount: insuranceExpectedAmount,
+                insurance_provider_id: insuranceProvider ? insuranceProvider.id : null,
+                insurance_payment_status: insurancePaymentStatus,
                 status,
                 organization_id: organizationId,
             });
@@ -419,48 +532,16 @@ export class SaleService {
                 }
             }
 
-            let insuranceProvider: InsuranceProvider | null = null;
-            if (createDto.insurance_provider_id) {
-                insuranceProvider = await transactionalEntityManager.findOne(InsuranceProvider, {
-                    where: { id: createDto.insurance_provider_id },
-                });
-            }
-
-            for (const p of payments) {
-                let paymentAmount = p.amount;
-
-                // If payment method is INSURANCE, validate and calculate
-                if (p.method === SalePaymentMethod.INSURANCE) {
-                    if (!insuranceProvider) {
-                        throw new AppError('Insurance provider is required for insurance payments', 400);
-                    }
-
-                    // Calculate coverage based on provider percentage
-                    const coveragePercent = Number(insuranceProvider.coverage_percentage);
-                    let CalculatedInsuranceAmount = (totalAmount * coveragePercent) / 100;
-
-                    // Apply max coverage limit if defined
-                    if (
-                        insuranceProvider.max_coverage_limit &&
-                        CalculatedInsuranceAmount > Number(insuranceProvider.max_coverage_limit)
-                    ) {
-                        CalculatedInsuranceAmount = Number(insuranceProvider.max_coverage_limit);
-                    }
-
-                    // Round to nearest integer (or logic preferred by user)
-                    paymentAmount = Math.round(CalculatedInsuranceAmount);
-                }
-
+            for (const p of normalized) {
                 const payment = salePaymentRepo.create({
                     sale_id: savedSale.id,
-                    method: p.method as SalePaymentMethod,
-                    amount: paymentAmount,
+                    method: p.method,
+                    amount: p.amount,
                     reference: p.reference,
                     organization_id: organizationId,
                 });
                 const savedPayment = await salePaymentRepo.save(payment);
 
-                // ✅ CRITICAL: Audit each payment event
                 await auditService.log({
                     facility_id: facilityId,
                     user_id: cashierId,
@@ -469,23 +550,24 @@ export class SaleService {
                     entity_type: AuditEntityType.SALE,
                     entity_id: savedSale.id,
                     entity_name: savedSale.sale_number,
-                    description: `Payment received: ${currencyCode} ${paymentAmount} via ${p.method}`,
-                    new_values: { payment_id: savedPayment.id, amount: paymentAmount, method: p.method },
+                    description: `Payment recorded: ${currencyCode} ${p.amount} via ${p.method}`,
+                    new_values: { payment_id: savedPayment.id, amount: p.amount, method: p.method },
                 });
+            }
 
-                if (p.method === SalePaymentMethod.INSURANCE && insuranceProvider) {
-                    const insuranceService = new InsuranceService(transactionalEntityManager);
-                    await insuranceService.createClaim({
-                        sale_id: savedSale.id,
-                        provider_id: insuranceProvider.id,
-                        patient_insurance_number: createDto.patient_insurance_number,
-                        total_amount: totalAmount,
-                        applied_coverage_percentage: Number(insuranceProvider.coverage_percentage),
-                        expected_amount: paymentAmount,
-                        copay_amount: totalAmount - paymentAmount,
-                        status: 'pending' as any,
-                    });
-                }
+            if (insuranceExpectedAmount > 0 && insuranceProvider) {
+                const insuranceService = new InsuranceService(transactionalEntityManager);
+                await insuranceService.createClaim({
+                    sale_id: savedSale.id,
+                    organization_id: organizationId,
+                    provider_id: insuranceProvider.id,
+                    patient_insurance_number: createDto.patient_insurance_number,
+                    total_amount: totalAmount,
+                    applied_coverage_percentage: Number(insuranceProvider.coverage_percentage),
+                    expected_amount: insuranceExpectedAmount,
+                    copay_amount: roundMoney(totalAmount - insuranceExpectedAmount, decimals),
+                    status: InsuranceClaimStatus.PENDING,
+                });
             }
 
             const result = await saleRepo.findOne({

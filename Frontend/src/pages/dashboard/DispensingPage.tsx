@@ -48,6 +48,9 @@ interface SuccessSummary {
     date: Date;
     facilityName: string;
     customerEmail?: string | null;
+    patientPaid?: number;
+    insuranceExpected?: number;
+    paymentLinesLabel?: string;
 }
 
 export function DispensingPage() {
@@ -92,6 +95,22 @@ export function DispensingPage() {
         const onChange = () => setIsMobile(mq.matches);
         mq.addEventListener('change', onChange);
         return () => mq.removeEventListener('change', onChange);
+    }, []);
+
+    const POS_PREFILL_KEY = 'tangacare.pos.prefillSearch';
+    const POS_BATCH_PREFILL_KEY = 'tangacare.pos.prefillDispenseBatch';
+
+    useEffect(() => {
+        try {
+            const token = sessionStorage.getItem(POS_PREFILL_KEY);
+            if (!token) return;
+            sessionStorage.removeItem(POS_PREFILL_KEY);
+            setSearchQuery(token);
+            setPage(1);
+            requestAnimationFrame(() => medicineSearchInputRef.current?.focus());
+        } catch {
+            /* ignore */
+        }
     }, []);
 
     const scrollToCart = () => {
@@ -424,6 +443,77 @@ export function DispensingPage() {
         }
     };
 
+    useEffect(() => {
+        if (isReadOnly || !user?.facility_id) return;
+        let cancelled = false;
+        (async () => {
+            try {
+                const raw = sessionStorage.getItem(POS_BATCH_PREFILL_KEY);
+                if (!raw) return;
+                sessionStorage.removeItem(POS_BATCH_PREFILL_KEY);
+                const parsed = JSON.parse(raw) as { medicineId?: number; batchId?: number };
+                const medicineId = Number(parsed.medicineId);
+                const batchId = Number(parsed.batchId);
+                if (!medicineId || !batchId) return;
+                const med = await pharmacyService.getMedicine(medicineId);
+                if (cancelled) return;
+                const stocks = await getDispensableStocks(med.id);
+                const target = stocks.find((s) => Number(s.batch?.id) === batchId);
+                if (!target?.batch) {
+                    toast.error('That batch is not available for dispensing.');
+                    return;
+                }
+                const violation = getFefoViolationMessage(stocks, batchId, 1);
+                if (violation) {
+                    const ok = window.confirm(`${violation}\n\nDispense this batch anyway?`);
+                    if (!ok) return;
+                }
+                const qtyAvail = getAvailableQuantity(target);
+                const picked = {
+                    ...target.batch,
+                    stock_id: target.id,
+                    current_quantity: qtyAvail,
+                    location_id: target.location?.id ?? target.location_id ?? null,
+                    location: target.location || null,
+                };
+                setCart((prev) => {
+                    const isSame = (item: CartItem) =>
+                        item.id === med.id &&
+                        (picked.stock_id && item.selectedBatch?.stock_id
+                            ? Number(item.selectedBatch.stock_id) === Number(picked.stock_id)
+                            : item.selectedBatch?.id === picked.id);
+                    const existing = prev.find((item) => isSame(item));
+                    if (existing) {
+                        if (existing.quantity >= qtyAvail) {
+                            toast.error(`Batch ${picked.batch_number} stock limit reached`);
+                            return prev;
+                        }
+                        return prev.map((item) =>
+                            isSame(item) ? { ...item, quantity: item.quantity + 1 } : item,
+                        );
+                    }
+                    const sellingPrice = Number(med.selling_price || 0);
+                    return [
+                        ...prev,
+                        {
+                            ...med,
+                            selling_price: sellingPrice,
+                            quantity: 1,
+                            selectedBatch: picked,
+                        },
+                    ];
+                });
+                toast.success(`Added ${med.name} — batch ${picked.batch_number}`);
+            } catch {
+                toast.error('Could not load batch for POS');
+            }
+        })();
+        return () => {
+            cancelled = true;
+        };
+        // eslint-disable-next-line react-hooks/exhaustive-deps -- one-shot prefill when facility ready
+    }, [user?.facility_id, isReadOnly]);
+
     const handleFindAlternatives = async (medicine: Medicine) => {
         const activeFacilityId = user?.facility_id;
         if (!activeFacilityId) {
@@ -668,6 +758,20 @@ export function DispensingPage() {
             void queryClient.invalidateQueries({ queryKey: ['dashboard-owner-panels'] });
             void queryClient.invalidateQueries({ queryKey: ['dashboard-owner-kpis'] });
 
+            const pm = payments.map((p: { method: string }) => String(p.method).replace(/_/g, ' ')).join(' + ');
+            const patientPaid =
+                sale.patient_paid_amount != null
+                    ? Number(sale.patient_paid_amount)
+                    : payments
+                          .filter((x: { method: string }) => x.method !== 'insurance')
+                          .reduce((s: number, x: { amount: number }) => s + Number(x.amount), 0);
+            const insuranceExpected =
+                sale.insurance_expected_amount != null
+                    ? Number(sale.insurance_expected_amount)
+                    : payments
+                          .filter((x: { method: string }) => x.method === 'insurance')
+                          .reduce((s: number, x: { amount: number }) => s + Number(x.amount), 0);
+
             setSuccessSummary({
                 amount: total,
                 saleId: sale.id,
@@ -675,6 +779,9 @@ export function DispensingPage() {
                 date: new Date(),
                 facilityName: currentFacility?.name ?? 'Pharmacy',
                 customerEmail: selectedPatient?.email ?? (selectedPatient as any)?.email ?? null,
+                patientPaid,
+                insuranceExpected,
+                paymentLinesLabel: pm || 'Cash',
             });
             setShowSuccess(true);
             toast.success('Sale completed successfully');
@@ -1069,11 +1176,28 @@ export function DispensingPage() {
                                 </span>
                             </div>
                             <div className="flex justify-between text-sm">
-                                <span className="text-slate-500 dark:text-slate-400">Payment Method</span>
-                                <span className="font-semibold text-slate-800 dark:text-slate-200 capitalize">
-                                    {successSummary.paymentMethod.replace(/_/g, ' ')}
+                                <span className="text-slate-500 dark:text-slate-400">Payment methods</span>
+                                <span className="font-semibold text-slate-800 dark:text-slate-200 capitalize text-right max-w-[55%]">
+                                    {successSummary.paymentLinesLabel ||
+                                        successSummary.paymentMethod.replace(/_/g, ' ')}
                                 </span>
                             </div>
+                            {(successSummary.insuranceExpected ?? 0) > 0 && (
+                                <>
+                                    <div className="flex justify-between text-sm">
+                                        <span className="text-slate-500 dark:text-slate-400">Patient paid</span>
+                                        <span className="font-semibold text-slate-800 dark:text-slate-200">
+                                            {formatMoney(successSummary.patientPaid ?? 0)}
+                                        </span>
+                                    </div>
+                                    <div className="flex justify-between text-sm">
+                                        <span className="text-slate-500 dark:text-slate-400">Insurance (pending)</span>
+                                        <span className="font-semibold text-teal-700 dark:text-teal-300">
+                                            {formatMoney(successSummary.insuranceExpected ?? 0)}
+                                        </span>
+                                    </div>
+                                </>
+                            )}
                                     <div className="flex justify-between text-sm">
                                         <span className="text-slate-500 dark:text-slate-400">Date</span>
                                         <span className="font-semibold text-slate-800 dark:text-slate-200">

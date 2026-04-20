@@ -5,6 +5,7 @@ import { Medicine } from '../../entities/Medicine.entity';
 import { PurchaseOrder } from '../../entities/PurchaseOrder.entity';
 import { Batch } from '../../entities/Batch.entity';
 import { SaleItem, Sale, SaleStatus } from '../../entities/Sale.entity';
+import { InsuranceClaim, InsuranceClaimStatus } from '../../entities/InsuranceClaim.entity';
 import { DispenseTransaction } from '../../entities/DispenseTransaction.entity';
 import { StockMovement, StockMovementType } from '../../entities/StockMovement.entity';
 import { Stock } from '../../entities/Stock.entity';
@@ -347,6 +348,23 @@ export interface ControlledDrugRegisterReport {
     medicine_name: string;
     current_balance: number;
     movements: ControlledDrugRegisterRow[];
+}
+
+export interface InsuranceDashboardSummary {
+    period: { start: string; end: string };
+    open_claims_count: number;
+    open_claims_expected_total: number;
+    rejected_claims_count: number;
+    insurance_received_total: number;
+    sales_patient_paid_total: number;
+    sales_insurance_expected_total: number;
+    top_providers: Array<{
+        provider_id: number;
+        provider_name: string;
+        claims_count: number;
+        expected_total: number;
+    }>;
+    stale_pending_claims_count: number;
 }
 
 export class ReportingService {
@@ -1839,6 +1857,119 @@ export class ReportingService {
             transaction_count: Number(row.transaction_count),
             percentage: totalAmount > 0 ? (Number(row.total_amount) / totalAmount) * 100 : 0,
         }));
+    }
+
+    async getInsuranceDashboardSummary(
+        facilityId: number | undefined,
+        startDate: string,
+        endDate: string,
+        organizationId?: number,
+    ): Promise<InsuranceDashboardSummary> {
+        this.requireScope(facilityId, organizationId, 'insurance dashboard summary');
+
+        const start = new Date(startDate);
+        const end = new Date(endDate);
+        end.setHours(23, 59, 59, 999);
+
+        const staleCutoff = new Date();
+        staleCutoff.setDate(staleCutoff.getDate() - 30);
+
+        const salesQb = this.saleRepository
+            .createQueryBuilder('sale')
+            .select('COALESCE(SUM(sale.patient_paid_amount), 0)', 'patient_paid')
+            .addSelect('COALESCE(SUM(sale.insurance_expected_amount), 0)', 'ins_expected')
+            .where('sale.created_at >= :start', { start })
+            .andWhere('sale.created_at <= :end', { end })
+            .andWhere('sale.status != :voided', { voided: SaleStatus.VOIDED });
+
+        if (facilityId) {
+            salesQb.andWhere('sale.facility_id = :facilityId', { facilityId });
+        } else if (organizationId) {
+            salesQb.innerJoin('sale.facility', 'sf').andWhere('sf.organization_id = :organizationId', {
+                organizationId,
+            });
+        }
+
+        const salesAgg = await salesQb.getRawOne();
+
+        const claimRepo = AppDataSource.getRepository(InsuranceClaim);
+
+        const baseClaimQb = () => {
+            const qb = claimRepo
+                .createQueryBuilder('claim')
+                .innerJoin('claim.sale', 'sale')
+                .where('sale.created_at >= :start', { start })
+                .andWhere('sale.created_at <= :end', { end })
+                .andWhere('sale.status != :voided', { voided: SaleStatus.VOIDED });
+            if (facilityId) {
+                qb.andWhere('sale.facility_id = :facilityId', { facilityId });
+            } else if (organizationId) {
+                qb.innerJoin('sale.facility', 'scf').andWhere('scf.organization_id = :organizationId', {
+                    organizationId,
+                });
+            }
+            return qb;
+        };
+
+        const openStatuses = [
+            InsuranceClaimStatus.PENDING,
+            InsuranceClaimStatus.SUBMITTED,
+            InsuranceClaimStatus.APPROVED,
+            InsuranceClaimStatus.PARTIALLY_APPROVED,
+        ];
+
+        const openRow = await baseClaimQb()
+            .andWhere('claim.status IN (:...openSt)', { openSt: openStatuses })
+            .select('COUNT(claim.id)::int', 'cnt')
+            .addSelect('COALESCE(SUM(claim.expected_amount), 0)', 'tot')
+            .getRawOne();
+
+        const rejectedRow = await baseClaimQb()
+            .andWhere('claim.status = :rej', { rej: InsuranceClaimStatus.REJECTED })
+            .select('COUNT(claim.id)::int', 'cnt')
+            .getRawOne();
+
+        const receivedRow = await baseClaimQb()
+            .andWhere('claim.status = :paid', { paid: InsuranceClaimStatus.PAID })
+            .select('COALESCE(SUM(claim.actual_received_amount), 0)', 'tot')
+            .getRawOne();
+
+        const staleRow = await baseClaimQb()
+            .andWhere('claim.status IN (:...pendSt)', {
+                pendSt: [InsuranceClaimStatus.PENDING, InsuranceClaimStatus.SUBMITTED],
+            })
+            .andWhere('claim.created_at < :stale', { stale: staleCutoff })
+            .select('COUNT(claim.id)::int', 'cnt')
+            .getRawOne();
+
+        const topProviders = await baseClaimQb()
+            .innerJoin('claim.provider', 'prov')
+            .select('prov.id', 'provider_id')
+            .addSelect('prov.name', 'provider_name')
+            .addSelect('COUNT(claim.id)::int', 'claims_count')
+            .addSelect('COALESCE(SUM(claim.expected_amount), 0)', 'expected_total')
+            .groupBy('prov.id')
+            .addGroupBy('prov.name')
+            .orderBy('expected_total', 'DESC')
+            .limit(8)
+            .getRawMany();
+
+        return {
+            period: { start: startDate, end: endDate },
+            open_claims_count: Number(openRow?.cnt ?? 0),
+            open_claims_expected_total: Number(openRow?.tot ?? 0),
+            rejected_claims_count: Number(rejectedRow?.cnt ?? 0),
+            insurance_received_total: Number(receivedRow?.tot ?? 0),
+            sales_patient_paid_total: Number(salesAgg?.patient_paid ?? 0),
+            sales_insurance_expected_total: Number(salesAgg?.ins_expected ?? 0),
+            top_providers: topProviders.map((r) => ({
+                provider_id: Number(r.provider_id),
+                provider_name: String(r.provider_name),
+                claims_count: Number(r.claims_count),
+                expected_total: Number(r.expected_total),
+            })),
+            stale_pending_claims_count: Number(staleRow?.cnt ?? 0),
+        };
     }
 
     async getGrossVsNetSales(
