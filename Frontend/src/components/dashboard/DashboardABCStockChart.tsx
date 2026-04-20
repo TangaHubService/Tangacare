@@ -1,16 +1,7 @@
 import { useQuery } from '@tanstack/react-query';
 import { useNavigate } from '@tanstack/react-router';
-import { BarChart3, ArrowRight } from 'lucide-react';
-import {
-    BarChart,
-    Bar,
-    XAxis,
-    YAxis,
-    Tooltip,
-    ResponsiveContainer,
-    CartesianGrid,
-    Cell,
-} from 'recharts';
+import { PieChart as PieChartIcon, ArrowRight } from 'lucide-react';
+import { PieChart, Pie, Cell, Tooltip, ResponsiveContainer, Legend } from 'recharts';
 import { pharmacyService } from '../../services/pharmacy.service';
 import type { ABCAnalysisData } from '../../types/pharmacy';
 import { useRuntimeConfig } from '../../context/RuntimeConfigContext';
@@ -43,7 +34,7 @@ export function DashboardABCStockChart({ facilityId }: DashboardABCStockChartPro
     if (facilityId == null) {
         return (
             <div className="flex h-full min-h-[200px] flex-col items-center justify-center rounded-2xl border border-dashed border-[#E5E7EB] bg-[#F8FAFC] p-6 text-center dark:border-slate-600 dark:bg-slate-800/40">
-                <BarChart3 className="mb-2 h-8 w-8 text-[#94A3B8] dark:text-slate-500" />
+                <PieChartIcon className="mb-2 h-8 w-8 text-[#94A3B8] dark:text-slate-500" />
                 <p className="text-sm font-semibold text-[#64748B] dark:text-slate-400">
                     Select a branch to see ABC stock value split (Class A / B / C).
                 </p>
@@ -82,6 +73,7 @@ export function DashboardABCStockChart({ facilityId }: DashboardABCStockChartPro
     const chartData = [
         {
             key: 'A',
+            name: 'Class A',
             label: 'Class A',
             short: 'A',
             value: s.classes.A.totalValue,
@@ -91,6 +83,7 @@ export function DashboardABCStockChart({ facilityId }: DashboardABCStockChartPro
         },
         {
             key: 'B',
+            name: 'Class B',
             label: 'Class B',
             short: 'B',
             value: s.classes.B.totalValue,
@@ -100,6 +93,7 @@ export function DashboardABCStockChart({ facilityId }: DashboardABCStockChartPro
         },
         {
             key: 'C',
+            name: 'Class C',
             label: 'Class C',
             short: 'C',
             value: s.classes.C.totalValue,
@@ -109,12 +103,13 @@ export function DashboardABCStockChart({ facilityId }: DashboardABCStockChartPro
         },
     ];
 
+
     return (
         <div className="flex h-full flex-col overflow-hidden rounded-2xl border border-[#E5E7EB] bg-[#FFFFFF] shadow-sm dark:border-slate-700 dark:bg-slate-900">
             <div className="flex items-start justify-between gap-2 border-b border-[#E5E7EB] px-4 py-3 dark:border-slate-700 sm:px-5 sm:py-4">
                 <div className="flex min-w-0 items-start gap-2">
                     <div className="mt-0.5 rounded-lg bg-[#EFF6FF] p-1.5 dark:bg-blue-900/40">
-                        <BarChart3 size={18} className="text-[#2563EB] dark:text-blue-300" />
+                        <PieChartIcon size={18} className="text-[#2563EB] dark:text-blue-300" />
                     </div>
                     <div className="min-w-0">
                         <h3 className="text-base font-semibold leading-tight text-[#111827] dark:text-slate-100">
@@ -136,41 +131,32 @@ export function DashboardABCStockChart({ facilityId }: DashboardABCStockChartPro
                 </button>
             </div>
 
-            <div className="min-h-[220px] flex-1 px-2 pb-2 pt-1 sm:px-4">
-                <ResponsiveContainer width="100%" height="100%" minHeight={220}>
-                    <BarChart
-                        data={chartData}
-                        margin={{ top: 12, right: 8, left: 4, bottom: 4 }}
-                        barCategoryGap="18%"
-                    >
-                        <CartesianGrid strokeDasharray="3 3" vertical={false} className="opacity-40" />
-                        <XAxis
-                            dataKey="short"
-                            tick={{ fill: 'currentColor', fontSize: 12, fontWeight: 700 }}
-                            className="text-slate-600 dark:text-slate-300"
-                            axisLine={false}
-                            tickLine={false}
-                        />
-                        <YAxis
-                            width={44}
-                            tickFormatter={(v) => {
-                                const n = Number(v);
-                                if (!Number.isFinite(n) || n === 0) return '0';
-                                if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
-                                if (n >= 1_000) return `${(n / 1_000).toFixed(0)}k`;
-                                return String(Math.round(n));
-                            }}
-                            tick={{ fontSize: 10 }}
-                            className="text-slate-500 dark:text-slate-400"
-                            axisLine={false}
-                            tickLine={false}
-                        />
+            <div className="relative min-h-[240px] flex-1 px-2 pb-1 pt-2 sm:px-4">
+                <ResponsiveContainer width="100%" height="100%" minHeight={240}>
+                    <PieChart margin={{ top: 4, right: 4, left: 4, bottom: 4 }}>
+                        <Pie
+                            data={chartData}
+                            dataKey="value"
+                            nameKey="name"
+                            cx="50%"
+                            cy="46%"
+                            innerRadius={58}
+                            outerRadius={88}
+                            paddingAngle={2}
+                            strokeWidth={1}
+                            stroke="var(--pie-stroke, #fff)"
+                        >
+                            {chartData.map((entry) => (
+                                <Cell key={entry.key} fill={entry.fill} />
+                            ))}
+                        </Pie>
                         <Tooltip
-                            cursor={{ fill: 'rgba(148, 163, 184, 0.12)' }}
                             formatter={(value) => [formatMoney(Number(value ?? 0)), 'Consumption value']}
                             labelFormatter={(_, payload) => {
                                 const p = payload?.[0]?.payload as (typeof chartData)[0] | undefined;
-                                return p ? `${p.label} · ${p.items} SKUs · ${p.pct.toFixed(1)}% of total` : '';
+                                return p
+                                    ? `${p.label} · ${p.items} SKUs · ${p.pct.toFixed(1)}% of total`
+                                    : '';
                             }}
                             contentStyle={{
                                 borderRadius: '12px',
@@ -178,13 +164,17 @@ export function DashboardABCStockChart({ facilityId }: DashboardABCStockChartPro
                                 fontSize: '12px',
                             }}
                         />
-                        <Bar dataKey="value" radius={[8, 8, 0, 0]} maxBarSize={56}>
-                            {chartData.map((entry) => (
-                                <Cell key={entry.key} fill={entry.fill} />
-                            ))}
-                        </Bar>
-                    </BarChart>
+                        <Legend verticalAlign="bottom" height={28} iconType="circle" />
+                    </PieChart>
                 </ResponsiveContainer>
+                <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center pb-8">
+                    <span className="text-[10px] font-bold uppercase tracking-wider text-[#94A3B8] dark:text-slate-500">
+                        Total value
+                    </span>
+                    <span className="text-sm font-black tabular-nums text-[#111827] dark:text-slate-100 sm:text-base">
+                        {s.totalValue > 0 ? formatMoney(s.totalValue) : '—'}
+                    </span>
+                </div>
             </div>
 
             <div className="grid grid-cols-3 gap-2 border-t border-[#E5E7EB] px-3 py-3 dark:border-slate-700 sm:px-4">

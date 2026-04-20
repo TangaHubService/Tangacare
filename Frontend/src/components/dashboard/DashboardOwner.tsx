@@ -479,7 +479,7 @@ export const DashboardOwner: React.FC<DashboardOwnerProps> = ({ facilityId }) =>
                                             summary?.sales_trend?.map((d) => ({
                                                 date: d.date,
                                                 dispensed: d.sales,
-                                                received: 0,
+                                                received: d.received ?? 0,
                                             })) || []
                                         }
                                     />

@@ -230,7 +230,6 @@ const NAV_SECTIONS: NavSection[] = [
                         allowedPermissions: ['inventory:write'],
                     },
                     { to: '/app/recalls', icon: AlertTriangle, label: 'Expiry & recalls' },
-                    { to: '/app/quality-cases', icon: ScrollText, label: 'Quality cases' },
                     {
                         to: '/app/variances',
                         icon: Scale,

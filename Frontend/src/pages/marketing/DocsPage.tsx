@@ -198,7 +198,7 @@ const tableOfContents = [
 
 export function DocsPage() {
     return (
-        <div className="min-h-screen bg-slate-50 dark:bg-slate-950">
+        <div className="marketing-site min-h-screen bg-slate-50 dark:bg-slate-950">
             <header className="sticky top-0 z-30 border-b border-slate-200 dark:border-slate-800 bg-white/95 dark:bg-slate-900/95 backdrop-blur">
                 <div className="max-w-6xl mx-auto px-4 sm:px-6 py-3 flex items-center justify-between">
                     <Link to="/" className="flex items-center gap-3">

@@ -65,7 +65,6 @@ import { PaymentAttempt } from '../entities/PaymentAttempt.entity';
 import { PaymentGateway } from '../entities/PaymentGateway.entity';
 import { WebhookEvent } from '../entities/WebhookEvent.entity';
 import { ReportExportJob } from '../entities/ReportExportJob.entity';
-import { QualityCase } from '../entities/QualityCase.entity';
 import { AuditSubscriber } from '../subscribers/AuditSubscriber';
 import { StockMovementImmutabilitySubscriber } from '../subscribers/StockMovementImmutabilitySubscriber';
 import { PurchasePriceHistory } from '../entities/PurchasePriceHistory.entity';
@@ -156,7 +155,6 @@ export const AppDataSource = new DataSource({
         PaypackWebhookEvent,
         WebhookEvent,
         ReportExportJob,
-        QualityCase,
     ],
     migrations: [path.join(__dirname, '../migrations/*.{ts,js}')],
     subscribers: [AuditSubscriber, StockMovementImmutabilitySubscriber],

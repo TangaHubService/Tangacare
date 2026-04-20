@@ -5,7 +5,7 @@ export function PrivacyPolicyPage() {
     const effectiveDate = 'March 8, 2026';
 
     return (
-        <div className="min-h-screen bg-slate-50 dark:bg-slate-950">
+        <div className="marketing-site min-h-screen bg-slate-50 dark:bg-slate-950">
             <header className="border-b border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900">
                 <div className="max-w-4xl mx-auto px-4 sm:px-6 py-4 flex items-center justify-between">
                     <Link to="/" className="flex items-center gap-2">

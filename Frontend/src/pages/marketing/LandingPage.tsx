@@ -11,7 +11,7 @@ import { Footer } from '../../components/marketing/Footer';
 
 export function LandingPage() {
     return (
-        <div className="flex flex-col min-h-screen font-sans selection:bg-teal-100 selection:text-teal-900 dark:selection:bg-teal-900 dark:selection:text-teal-100">
+        <div className="marketing-site flex flex-col min-h-screen font-sans selection:bg-teal-100 selection:text-teal-900 dark:selection:bg-teal-900 dark:selection:text-teal-100">
             <Navbar />
             <main className="flex-1">
                 <Hero />

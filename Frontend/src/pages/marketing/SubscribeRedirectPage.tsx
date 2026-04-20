@@ -10,6 +10,8 @@ export function SubscribeRedirectPage() {
         navigate({ to: '/checkout' as any, search: { plan, mode: 'purchase' } as any, replace: true } as any);
     }, [navigate]);
 
-    return <div className="p-6 text-sm text-slate-500">Redirecting to subscription...</div>;
+    return (
+        <div className="marketing-site p-6 text-sm text-slate-500">Redirecting to subscription...</div>
+    );
 }
 

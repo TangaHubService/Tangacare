@@ -30,7 +30,6 @@ import { ColdChainTelemetrySource } from '../entities/ColdChainTelemetry.entity'
 import { VendorReturnReason } from '../entities/VendorReturn.entity';
 import { DisposalStatus, DisposalType, DisposalReason } from '../entities/DisposalRequest.entity';
 import { ItemCondition, RefundMethod, ReturnReason, ReturnStatus } from '../entities/CustomerReturn.entity';
-import { QualityCaseType, QualityCaseStatus } from '../entities/QualityCase.entity';
 import { SupplierQualificationStatus } from '../entities/Supplier.entity';
 
 export class CreateStorageLocationDto {
@@ -1931,44 +1930,6 @@ export class CreateWalkInPrescriptionDto {
     @IsInt()
     @IsOptional()
     validity_days?: number;
-}
-
-export class CreateQualityCaseDto {
-    @IsInt()
-    facility_id: number;
-
-    @IsEnum(QualityCaseType)
-    type: QualityCaseType;
-
-    @IsString()
-    @MinLength(3)
-    title: string;
-
-    @IsString()
-    @MinLength(3)
-    description: string;
-
-    @IsInt()
-    @IsOptional()
-    medicine_id?: number;
-
-    @IsInt()
-    @IsOptional()
-    batch_id?: number;
-
-    @IsString()
-    @IsOptional()
-    capa_actions?: string;
-}
-
-export class UpdateQualityCaseDto {
-    @IsEnum(QualityCaseStatus)
-    @IsOptional()
-    status?: QualityCaseStatus;
-
-    @IsString()
-    @IsOptional()
-    capa_actions?: string;
 }
 
 export class ReleaseStockQcDto {

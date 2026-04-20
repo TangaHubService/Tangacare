@@ -9,6 +9,7 @@ import { DispenseTransaction } from '../../entities/DispenseTransaction.entity';
 import { StockMovement, StockMovementType } from '../../entities/StockMovement.entity';
 import { Stock } from '../../entities/Stock.entity';
 import { Facility } from '../../entities/Facility.entity';
+import { GoodsReceipt } from '../../entities/GoodsReceipt.entity';
 import { AuditService, StockMovementRow } from './audit.service';
 import { ReplenishmentService } from './replenishment.service';
 
@@ -2435,14 +2436,82 @@ export class ReportingService {
         };
     }
 
+    /**
+     * Daily value of stock received via goods receipts (PO receiving), by received_date.
+     * Aligns with the "Received" series on the owner dashboard consumption chart (same currency as sales).
+     */
+    private async getDailyGoodsReceiptValueByDate(
+        facilityId: number | undefined,
+        startDate: Date,
+        endDate: Date,
+        organizationId?: number,
+    ): Promise<Map<string, number>> {
+        this.requireScope(facilityId, organizationId, 'goods receipt trend');
+        const start = new Date(startDate);
+        start.setHours(0, 0, 0, 0);
+        const end = new Date(endDate);
+        end.setHours(23, 59, 59, 999);
+
+        const qb = AppDataSource.getRepository(GoodsReceipt)
+            .createQueryBuilder('gr')
+            .innerJoin('gr.items', 'gri')
+            .select("TO_CHAR(gr.received_date::date, 'YYYY-MM-DD')", 'date')
+            .addSelect('COALESCE(SUM(gri.quantity_received * gri.unit_cost), 0)', 'received_value')
+            .where('gr.received_date BETWEEN :start AND :end', { start, end })
+            .groupBy('gr.received_date::date')
+            .orderBy('gr.received_date::date', 'ASC');
+
+        this.applyTenantScope(qb, 'gr', facilityId, organizationId);
+
+        const rows = await qb.getRawMany<{ date: string; received_value: string }>();
+        const map = new Map<string, number>();
+        for (const row of rows) {
+            if (row.date) {
+                map.set(row.date, Number(row.received_value || 0));
+            }
+        }
+        return map;
+    }
+
     async getSalesTrends(
         facilityId: number | undefined,
         startDate: string,
         endDate: string,
         organizationId?: number,
     ): Promise<any> {
-        const report = await this.getSalesReport(facilityId, new Date(startDate), new Date(endDate), organizationId);
-        return report.daily_sales;
+        const start = new Date(startDate);
+        const end = new Date(endDate);
+        const report = await this.getSalesReport(facilityId, start, end, organizationId);
+        const receivedByDate = await this.getDailyGoodsReceiptValueByDate(
+            facilityId,
+            start,
+            end,
+            organizationId,
+        );
+
+        const trendMap = new Map<string, Record<string, unknown>>();
+        for (const d of report.daily_sales) {
+            trendMap.set(d.date, {
+                ...d,
+                received: receivedByDate.get(d.date) ?? 0,
+            });
+        }
+        for (const [date, received] of receivedByDate) {
+            if (!trendMap.has(date)) {
+                trendMap.set(date, {
+                    date,
+                    revenue: 0,
+                    profit: 0,
+                    sales_count: 0,
+                    sales: 0,
+                    received,
+                });
+            }
+        }
+
+        return Array.from(trendMap.values()).sort((a, b) =>
+            String(a.date).localeCompare(String(b.date)),
+        );
     }
 
     async getInventoryAgingReport(

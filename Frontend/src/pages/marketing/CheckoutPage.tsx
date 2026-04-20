@@ -202,7 +202,7 @@ export function CheckoutPage() {
     };
 
     return (
-        <div className="min-h-screen bg-slate-50 dark:bg-slate-950 p-6">
+        <div className="marketing-site min-h-screen bg-slate-50 dark:bg-slate-950 p-6">
             <div className="max-w-4xl mx-auto space-y-6">
                 <div>
                     <h1 className="text-2xl font-black text-healthcare-dark dark:text-white">Subscription checkout</h1>

@@ -31,6 +31,16 @@ html {
     scroll-behavior: smooth;
 }
 
+/* Public marketing routes: clear pointer on taps/clicks (CTAs, nav, selects). */
+.marketing-site :where(
+    button:not(:disabled),
+    [role='button']:not([aria-disabled='true']),
+    a[href],
+    select:not(:disabled)
+) {
+    cursor: pointer;
+}
+
 :root {
     --bg-primary: #f8fafc;
     --bg-secondary: #ffffff;

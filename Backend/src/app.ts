@@ -58,7 +58,6 @@ import storageLocationRoutes from './routes/pharmacy/storage-location.routes';
 import coldChainRoutes from './routes/pharmacy/cold-chain.routes';
 import parRoutes from './routes/pharmacy/par.routes';
 import walkInPrescriptionRoutes from './routes/pharmacy/walkin-prescription.routes';
-import qualityCaseRoutes from './routes/pharmacy/quality-case.routes';
 import { SchedulerService } from './services/pharmacy/scheduler.service';
 
 import { SocketGateway } from './socket/socket.gateway';
@@ -205,7 +204,6 @@ app.use(`${API_PREFIX}/pharmacy/storage-locations`, storageLocationRoutes);
 app.use(`${API_PREFIX}/pharmacy/cold-chain`, coldChainRoutes);
 app.use(`${API_PREFIX}/pharmacy/par`, parRoutes);
 app.use(`${API_PREFIX}/pharmacy/walk-in-prescriptions`, walkInPrescriptionRoutes);
-app.use(`${API_PREFIX}/pharmacy/quality-cases`, qualityCaseRoutes);
 app.use(`${API_PREFIX}/public`, publicRoutes);
 
 app.use(notFoundHandler);

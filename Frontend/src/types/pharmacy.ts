@@ -386,35 +386,6 @@ export interface Supplier {
     licence_document_url?: string | null;
 }
 
-export type QualityCaseType = 'complaint' | 'capa' | 'adr';
-export type QualityCaseStatus = 'open' | 'investigating' | 'closed';
-
-export interface QualityCase {
-    id: number;
-    organization_id: number;
-    facility_id: number | null;
-    type: QualityCaseType;
-    status: QualityCaseStatus;
-    title: string;
-    description: string;
-    medicine_id?: number | null;
-    batch_id?: number | null;
-    capa_actions?: string | null;
-    reported_at: string;
-    closed_at?: string | null;
-}
-
-/** Body for POST /pharmacy/quality-cases */
-export interface CreateQualityCaseInput {
-    facility_id: number;
-    type: QualityCaseType;
-    title: string;
-    description: string;
-    medicine_id?: number;
-    batch_id?: number;
-    capa_actions?: string;
-}
-
 export interface ProcurementOrderItem {
     id: number;
     purchase_order_id: number;
@@ -1069,7 +1040,12 @@ export interface DashboardSummary {
     categories: CategorySummary[];
     payments: PaymentBreakdown[];
     expiry_risk: ExpiryRiskBuckets;
-    sales_trend?: Array<{ date: string; sales: number }>;
+    sales_trend?: Array<{
+        date: string;
+        sales: number;
+        /** Purchase receiving value (goods receipts), same period as sales */
+        received?: number;
+    }>;
 }
 
 export interface GlobalSearchResultItem {
