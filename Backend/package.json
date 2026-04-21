@@ -20,6 +20,7 @@
     "backfill:legacy-medicines": "ts-node scripts/backfill-legacy-medicine-organization.ts",
     "seed": "ts-node src/seeds/index.ts",
     "ensure-super-admin": "ts-node scripts/ensure-super-admin.ts",
+    "vsdc-pilot-smoke": "ts-node scripts/vsdc-pilot-smoke.ts",
     "test": "jest",
     "test:watch": "jest --watch",
     "test:coverage": "jest --coverage",

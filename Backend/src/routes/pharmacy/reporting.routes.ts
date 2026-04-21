@@ -65,6 +65,15 @@ router.get('/purchase-history/:facilityId?', authenticate, scopeMiddleware, repo
 router.get('/tax-summary/:facilityId?', authenticate, scopeMiddleware, reportingController.getTaxSummary);
 
 router.get(
+    '/fiscal-queue/:facilityId?',
+    authenticate,
+    requireFacilityScope,
+    authorize(UserRole.FACILITY_ADMIN, UserRole.SUPER_ADMIN, UserRole.AUDITOR),
+    scopeMiddleware,
+    reportingController.getFiscalQueueOperationalReport,
+);
+
+router.get(
     '/customer-loyalty/:facilityId',
     authenticate,
     requireFacilityScope,

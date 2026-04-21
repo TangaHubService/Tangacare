@@ -23,13 +23,28 @@ export class CreditNote {
     amount: number;
 
     @Column({ type: 'text', nullable: true })
-    reason: string;
+    reason: string | null;
 
     @Column({ type: 'varchar', length: 20, default: 'pending' })
     fiscal_status: string;
 
     @Column({ type: 'varchar', length: 255, nullable: true })
-    ebm_reference: string;
+    ebm_reference: string | null;
+
+    @Column({ type: 'varchar', length: 100, nullable: true })
+    ebm_receipt_number: string | null;
+
+    @Column({ type: 'varchar', length: 128, nullable: true })
+    vsdc_internal_data: string | null;
+
+    @Column({ type: 'varchar', length: 128, nullable: true })
+    vsdc_receipt_signature: string | null;
+
+    @Column({ type: 'timestamp with time zone', nullable: true })
+    vsdc_receipt_published_at: Date | null;
+
+    @Column({ type: 'varchar', length: 64, nullable: true })
+    vsdc_sdc_id: string | null;
 
     @CreateDateColumn({ type: 'timestamp with time zone' })
     created_at: Date;

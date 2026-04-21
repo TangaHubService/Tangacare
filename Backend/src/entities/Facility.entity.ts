@@ -89,6 +89,15 @@ export class Facility {
     @Column({ type: 'varchar', length: 100, nullable: true })
     tax_registration_number: string;
 
+    @Column({ type: 'varchar', length: 30, nullable: true })
+    tin_number: string | null;
+
+    @Column({ type: 'varchar', length: 100, nullable: true })
+    ebm_device_serial: string | null;
+
+    @Column({ type: 'varchar', length: 100, nullable: true })
+    ebm_sdcid: string | null;
+
     @CreateDateColumn({ type: 'timestamp with time zone' })
     created_at: Date;
 

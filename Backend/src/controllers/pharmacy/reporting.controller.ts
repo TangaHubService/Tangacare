@@ -259,6 +259,24 @@ export class ReportingController {
         }
     };
 
+    getFiscalQueueOperationalReport = async (req: Request, res: Response): Promise<void> => {
+        try {
+            const facilityId = resolveFacilityId(req);
+            if (!facilityId) {
+                ResponseUtil.badRequest(res, 'Facility ID is required');
+                return;
+            }
+            const organizationId = resolveOrganizationId(req);
+            const result = await this.reportingService.getFiscalQueueOperationalReport(
+                facilityId,
+                organizationId ?? undefined,
+            );
+            ResponseUtil.success(res, result, 'Fiscal queue operational report retrieved successfully');
+        } catch (error: any) {
+            ResponseUtil.internalError(res, 'Failed to generate fiscal queue operational report', error.message);
+        }
+    };
+
     getCustomerLoyaltyReport = async (req: Request, res: Response): Promise<void> => {
         try {
             const facilityId = resolveFacilityId(req);

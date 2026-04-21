@@ -68,6 +68,7 @@ import { ReportExportJob } from '../entities/ReportExportJob.entity';
 import { AuditSubscriber } from '../subscribers/AuditSubscriber';
 import { StockMovementImmutabilitySubscriber } from '../subscribers/StockMovementImmutabilitySubscriber';
 import { PurchasePriceHistory } from '../entities/PurchasePriceHistory.entity';
+import { FiscalReceiptCounter } from '../entities/FiscalReceiptCounter.entity';
 
 dotenv.config();
 const sslEnabled = (process.env.DB_SSL || '').toLowerCase() === 'true';
@@ -145,6 +146,7 @@ export const AppDataSource = new DataSource({
         DepartmentParLevel,
         ParReplenishmentTask,
         PurchasePriceHistory,
+        FiscalReceiptCounter,
         SubscriptionPlan,
         PlanFeature,
         Subscription,

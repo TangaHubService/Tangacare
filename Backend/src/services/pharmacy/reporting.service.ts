@@ -3093,4 +3093,73 @@ export class ReportingService {
             mismatch_count: mismatches.length,
         };
     }
+
+    async getFiscalQueueOperationalReport(facilityId: number, organizationId?: number): Promise<{
+        facility_id: number;
+        organization_id: number | null;
+        generated_at: string;
+        queue_summary: {
+            pending: number;
+            retryable: number;
+            processing: number;
+            dead_letter: number;
+            success: number;
+        };
+        recent_failures: Array<{
+            id: number;
+            document_type: string;
+            document_id: number | null;
+            sale_id: number | null;
+            attempt_count: number;
+            last_error_code: string | null;
+            error_message: string | null;
+            last_attempt_at: string | null;
+        }>;
+    }> {
+        this.requireScope(facilityId, organizationId, 'fiscal queue report');
+
+        const summaryRows = await AppDataSource.query<Array<{ status: string; count: string }>>(
+            `SELECT status, COUNT(*)::text AS count
+             FROM ebm_submission_queue
+             GROUP BY status`,
+        );
+
+        const failureRows = await AppDataSource.query<
+            Array<{
+                id: number;
+                document_type: string;
+                document_id: number | null;
+                sale_id: number | null;
+                attempt_count: number;
+                last_error_code: string | null;
+                error_message: string | null;
+                last_attempt_at: string | null;
+            }>
+        >(
+            `SELECT id, document_type, document_id, sale_id, attempt_count, last_error_code, error_message,
+                    CASE WHEN last_attempt_at IS NULL THEN NULL ELSE to_char(last_attempt_at, 'YYYY-MM-DD"T"HH24:MI:SS"Z"') END AS last_attempt_at
+             FROM ebm_submission_queue
+             WHERE status IN ('retryable', 'dead_letter')
+             ORDER BY updated_at DESC NULLS LAST, created_at DESC
+             LIMIT 100`,
+        );
+
+        const byStatus: Record<string, number> = Object.fromEntries(
+            summaryRows.map((row) => [row.status, Number(row.count)]),
+        );
+
+        return {
+            facility_id: facilityId,
+            organization_id: organizationId ?? null,
+            generated_at: new Date().toISOString(),
+            queue_summary: {
+                pending: byStatus.pending || 0,
+                retryable: byStatus.retryable || 0,
+                processing: byStatus.processing || 0,
+                dead_letter: byStatus.dead_letter || 0,
+                success: byStatus.success || 0,
+            },
+            recent_failures: failureRows,
+        };
+    }
 }

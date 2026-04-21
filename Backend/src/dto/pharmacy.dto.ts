@@ -1539,6 +1539,11 @@ export class CreateSaleItemDto {
     @IsNumber()
     @Min(0)
     unit_price: number;
+
+    @IsString()
+    @IsOptional()
+    @MaxLength(2)
+    tax_category?: string;
 }
 
 export class CreateSalePaymentDto {
@@ -1594,6 +1599,45 @@ export class CreateSaleDto {
     @IsString()
     @IsOptional()
     patient_id_number?: string;
+
+    @IsString()
+    @IsOptional()
+    @MaxLength(30)
+    customer_tin?: string;
+
+    @IsString()
+    @IsOptional()
+    @MaxLength(60)
+    customer_name?: string;
+
+    @IsString()
+    @IsOptional()
+    @MaxLength(6)
+    purchase_order_code?: string;
+
+    @IsString()
+    @IsOptional()
+    @MaxLength(2)
+    receipt_type?: string;
+
+    @IsString()
+    @IsOptional()
+    @MaxLength(1)
+    transaction_type?: string;
+
+    @IsInt()
+    @IsOptional()
+    report_number?: number;
+
+    @IsString()
+    @IsOptional()
+    @MaxLength(100)
+    receipt_top_message?: string;
+
+    @IsString()
+    @IsOptional()
+    @MaxLength(100)
+    receipt_bottom_message?: string;
 
     @IsInt()
     @IsOptional()

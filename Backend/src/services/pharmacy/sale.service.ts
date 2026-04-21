@@ -9,6 +9,9 @@ import {
     SalePaymentMethod,
     SaleStatus,
     InsurancePaymentStatus,
+    FiscalInvoiceType,
+    FiscalReceiptLabel,
+    FiscalReceiptType,
 } from '../../entities/Sale.entity';
 import { User, UserRole } from '../../entities/User.entity';
 import { Batch } from '../../entities/Batch.entity';
@@ -31,6 +34,9 @@ import { SETTINGS_KEYS } from './settings.constants';
 import { hasPermission, PERMISSIONS } from '../../config/permissions';
 import { PdfBrandingUtil } from '../../utils/pdf-branding.util';
 import { roundMoney, formatMoney as formatMoneyUtil } from '../../utils/money.util';
+import { EBMClient, EBMSubmitPayload } from './ebm.client';
+import { ReceiptTypeCode, TransactionTypeCode } from './vsdc.contract';
+import { logger } from '../../middleware/logger.middleware';
 
 
 export interface CreateSaleResult {
@@ -41,9 +47,11 @@ export interface CreateSaleResult {
 
 export class SaleService {
     private saleRepository: Repository<Sale>;
+    private ebmClient: EBMClient;
     constructor(entityManager?: EntityManager) {
         const source = (entityManager as any) || AppDataSource;
         this.saleRepository = source.getRepository(Sale);
+        this.ebmClient = new EBMClient();
     }
     async generateSaleNumber(facilityId: number): Promise<string> {
         void facilityId;
@@ -56,7 +64,7 @@ export class SaleService {
         facilityId: number,
         organizationId: number,
     ): Promise<CreateSaleResult> {
-        return await AppDataSource.transaction(async (transactionalEntityManager) => {
+        const transactionResult = await AppDataSource.transaction(async (transactionalEntityManager) => {
             const saleRepo = transactionalEntityManager.getRepository(Sale);
             const saleItemRepo = transactionalEntityManager.getRepository(SaleItem);
             const salePaymentRepo = transactionalEntityManager.getRepository(SalePayment);
@@ -427,6 +435,9 @@ export class SaleService {
             let status: SaleStatus = SaleStatus.UNPAID;
             if (paidAmount >= totalAmount) status = SaleStatus.PAID;
             else if (paidAmount > 0) status = SaleStatus.PARTIALLY_PAID;
+            const receiptType = this.normalizeReceiptType(createDto.receipt_type);
+            const transactionType = this.normalizeTransactionType(createDto.transaction_type);
+            const receiptLabel = this.deriveReceiptLabel(receiptType, transactionType);
 
             const insurancePaymentStatus =
                 insuranceExpectedAmount > 0
@@ -454,6 +465,11 @@ export class SaleService {
                 insurance_provider_id: insuranceProvider ? insuranceProvider.id : null,
                 insurance_payment_status: insurancePaymentStatus,
                 status,
+                customer_tin: createDto.customer_tin || null,
+                invoice_type: FiscalInvoiceType.NORMAL,
+                receipt_type: receiptType,
+                receipt_label: receiptLabel,
+                fiscal_status: 'pending',
                 organization_id: organizationId,
             });
 
@@ -505,6 +521,7 @@ export class SaleService {
                     unit_price: item.unit_price,
                     unit_cost: unitCost, // ✅ CRITICAL: Capture COGS at sale time
                     total_price: item.unit_price * item.quantity,
+                    tax_category: item.tax_category || (vatRate > 0 ? 'B' : 'A'),
                     organization_id: organizationId,
                 });
                 await saleItemRepo.save(saleItem);
@@ -586,6 +603,236 @@ export class SaleService {
 
             return { sale: result, warnings };
         });
+
+        const fiscalWarning = await this.submitFiscalInvoiceNonBlocking(
+            transactionResult.sale,
+            organizationId,
+            facilityId,
+            createDto,
+        );
+        if (fiscalWarning) {
+            transactionResult.warnings.push(fiscalWarning);
+        }
+
+        const refreshedSale = await this.saleRepository.findOne({
+            where: { id: transactionResult.sale.id, organization_id: organizationId, facility_id: facilityId },
+            relations: ['items', 'items.medicine', 'items.batch', 'payments', 'patient', 'cashier', 'facility'],
+        });
+        if (refreshedSale) {
+            transactionResult.sale = refreshedSale;
+        }
+
+        return transactionResult;
+    }
+
+    private normalizeReceiptType(raw: string | undefined): FiscalReceiptType {
+        switch (String(raw || '').toUpperCase()) {
+            case FiscalReceiptType.COPY:
+                return FiscalReceiptType.COPY;
+            case FiscalReceiptType.TRAINING:
+                return FiscalReceiptType.TRAINING;
+            case FiscalReceiptType.PROFORMA:
+                return FiscalReceiptType.PROFORMA;
+            default:
+                return FiscalReceiptType.NORMAL;
+        }
+    }
+
+    private normalizeTransactionType(raw: string | undefined): TransactionTypeCode {
+        return String(raw || '').toUpperCase() === TransactionTypeCode.REFUND
+            ? TransactionTypeCode.REFUND
+            : TransactionTypeCode.SALE;
+    }
+
+    private deriveReceiptLabel(
+        receiptType: FiscalReceiptType,
+        transactionType: TransactionTypeCode,
+    ): FiscalReceiptLabel {
+        if (receiptType === FiscalReceiptType.NORMAL && transactionType === TransactionTypeCode.SALE) {
+            return FiscalReceiptLabel.NS;
+        }
+        if (receiptType === FiscalReceiptType.NORMAL && transactionType === TransactionTypeCode.REFUND) {
+            return FiscalReceiptLabel.NR;
+        }
+        if (receiptType === FiscalReceiptType.COPY && transactionType === TransactionTypeCode.SALE) {
+            return FiscalReceiptLabel.CS;
+        }
+        if (receiptType === FiscalReceiptType.COPY && transactionType === TransactionTypeCode.REFUND) {
+            return FiscalReceiptLabel.CR;
+        }
+        if (receiptType === FiscalReceiptType.TRAINING && transactionType === TransactionTypeCode.SALE) {
+            return FiscalReceiptLabel.TS;
+        }
+        if (receiptType === FiscalReceiptType.TRAINING && transactionType === TransactionTypeCode.REFUND) {
+            return FiscalReceiptLabel.TR;
+        }
+        return FiscalReceiptLabel.PS;
+    }
+
+    private mapPaymentTypeCode(sale: Sale): string {
+        const payment = (sale.payments || []).find((line) => Number(line.amount) > 0);
+        switch (payment?.method) {
+            case SalePaymentMethod.CARD:
+                return '05';
+            case SalePaymentMethod.BANK:
+                return '04';
+            case SalePaymentMethod.MOBILE_MONEY:
+                return '06';
+            case SalePaymentMethod.CASH:
+                return '01';
+            case SalePaymentMethod.INSURANCE:
+                return '07';
+            default:
+                return '01';
+        }
+    }
+
+    private extractInvoiceNumber(sale: Sale): number {
+        const digits = String(sale.sale_number || '').replace(/\D+/g, '');
+        const parsed = Number(digits);
+        return Number.isFinite(parsed) && parsed > 0 ? parsed : sale.id;
+    }
+
+    private async incrementReceiptCounters(
+        facilityId: number,
+        receiptLabel: string,
+    ): Promise<{ typeCounter: number; globalCounter: number }> {
+        const typed = await AppDataSource.query<Array<{ current_value: string }>>(
+            `INSERT INTO fiscal_receipt_counters (facility_id, receipt_label, current_value, last_issued_at)
+             VALUES ($1, $2, 1, NOW())
+             ON CONFLICT (facility_id, receipt_label)
+             DO UPDATE
+             SET current_value = fiscal_receipt_counters.current_value + 1,
+                 last_issued_at = NOW(),
+                 updated_at = NOW()
+             RETURNING current_value::text`,
+            [facilityId, receiptLabel],
+        );
+
+        const global = await AppDataSource.query<Array<{ current_value: string }>>(
+            `INSERT INTO fiscal_receipt_counters (facility_id, receipt_label, current_value, last_issued_at)
+             VALUES ($1, 'GT', 1, NOW())
+             ON CONFLICT (facility_id, receipt_label)
+             DO UPDATE
+             SET current_value = fiscal_receipt_counters.current_value + 1,
+                 last_issued_at = NOW(),
+                 updated_at = NOW()
+             RETURNING current_value::text`,
+            [facilityId],
+        );
+
+        return {
+            typeCounter: Number(typed[0]?.current_value || 1),
+            globalCounter: Number(global[0]?.current_value || 1),
+        };
+    }
+
+    private async submitFiscalInvoiceNonBlocking(
+        sale: Sale,
+        organizationId: number,
+        facilityId: number,
+        createDto: CreateSaleDto,
+    ): Promise<string | null> {
+        if (typeof (AppDataSource as any).query !== 'function') {
+            return null;
+        }
+
+        const loaded = await this.saleRepository.findOne({
+            where: { id: sale.id, organization_id: organizationId, facility_id: facilityId },
+            relations: ['items', 'items.medicine', 'facility', 'payments'],
+        });
+        if (!loaded) {
+            return 'Fiscal submission skipped: sale not found during post-commit submission.';
+        }
+
+        const facility = loaded.facility as any;
+        const tin = String(facility?.tin_number || facility?.tax_registration_number || '').trim();
+        if (!tin) {
+            logger.warn('[VSDC] facility TIN missing, skipping fiscal submit', {
+                saleId: loaded.id,
+                facilityId,
+            });
+            return 'Fiscal submission skipped because facility TIN is missing.';
+        }
+
+        const counters = await this.incrementReceiptCounters(facilityId, loaded.receipt_label);
+        await this.saleRepository.update(
+            { id: loaded.id, organization_id: organizationId, facility_id: facilityId },
+            {
+                receipt_type_counter: counters.typeCounter,
+                receipt_global_counter: counters.globalCounter,
+            } as Partial<Sale>,
+        );
+
+        const payload: EBMSubmitPayload = {
+            sale_id: loaded.id,
+            sale_number: loaded.sale_number,
+            facility_id: loaded.facility_id,
+            organization_id: loaded.organization_id,
+            branch_id: '00',
+            invoice_number: this.extractInvoiceNumber(loaded),
+            facility_tin: tin,
+            device_serial: String(facility?.ebm_device_serial || '').trim(),
+            sdc_id: String(facility?.ebm_sdcid || '').trim() || undefined,
+            mrc_no: String(facility?.ebm_device_serial || '').trim() || undefined,
+            receipt_type: (loaded.receipt_type as unknown as ReceiptTypeCode) || ReceiptTypeCode.NORMAL,
+            transaction_type:
+                loaded.receipt_label === FiscalReceiptLabel.NR
+                    ? TransactionTypeCode.REFUND
+                    : TransactionTypeCode.SALE,
+            payment_type_code: this.mapPaymentTypeCode(loaded),
+            customer_tin: loaded.customer_tin || createDto.customer_tin,
+            customer_name: createDto.customer_name,
+            purchase_order_code: createDto.purchase_order_code,
+            total_amount: Number(loaded.total_amount),
+            vat_amount: Number(loaded.vat_amount),
+            taxable_amount_b: Number(loaded.subtotal),
+            invoice_type: FiscalInvoiceType.NORMAL,
+            sale_datetime: loaded.created_at,
+            report_number: createDto.report_number || this.extractInvoiceNumber(loaded),
+            trade_name: String((loaded.facility as any)?.name || 'Tangacare Pharmacy'),
+            address: String((loaded.facility as any)?.address || ''),
+            top_message: createDto.receipt_top_message,
+            bottom_message: createDto.receipt_bottom_message,
+            initiated_by: String(loaded.cashier_id),
+            items: (loaded.items || []).map((line) => ({
+                description: (line as any).medicine?.name || `Medicine-${line.medicine_id}`,
+                item_code: `MED-${line.medicine_id}`,
+                item_class_code: undefined,
+                tax_category: line.tax_category || 'B',
+                quantity: Number(line.quantity),
+                unit_price: Number(line.unit_price),
+                taxable_amount: Number(line.total_price),
+                vat_amount: Number(loaded.vat_rate) > 0 ? Number((Number(line.total_price) * Number(loaded.vat_rate)).toFixed(2)) : 0,
+                total: Number(line.total_price),
+            })),
+        };
+
+        const result = await this.ebmClient.submitFiscalInvoice(payload);
+        if (result.success) {
+            await this.saleRepository.update(
+                { id: loaded.id, organization_id: organizationId, facility_id: facilityId },
+                {
+                    fiscal_status: 'sent',
+                    ebm_submitted_at: new Date(),
+                    ebm_reference: result.reference || null,
+                    ebm_receipt_number: result.reference || null,
+                    vsdc_internal_data: result.internalData || null,
+                    vsdc_receipt_signature: result.receiptSignature || null,
+                    vsdc_receipt_published_at: result.publishedAt || null,
+                    vsdc_sdc_id: result.sdcId || null,
+                    receipt_global_counter: result.totalReceiptNumber || counters.globalCounter,
+                } as Partial<Sale>,
+            );
+            return null;
+        }
+
+        await this.ebmClient.enqueueRetry('sale', loaded.id, loaded.id, payload);
+        await this.saleRepository.update(
+            { id: loaded.id, organization_id: organizationId, facility_id: facilityId },
+            { fiscal_status: 'pending' } as Partial<Sale>,
+        );
+        return `Fiscal submission queued for retry (${result.errorCode || 'unknown_error'}).`;
     }
 
     async listSales(
@@ -699,6 +946,24 @@ export class SaleService {
                 return normalized ? normalized.charAt(0).toUpperCase() + normalized.slice(1) : '-';
             };
 
+            const dashEvery4 = (value: string | null | undefined): string => {
+                const compact = String(value || '').replace(/[^A-Za-z0-9]/g, '');
+                if (!compact) return '-';
+                return compact.match(/.{1,4}/g)?.join('-') || compact;
+            };
+
+            const receiptType = String((sale as any).receipt_type || 'N').toUpperCase();
+            const receiptLabel = String((sale as any).receipt_label || 'NS').toUpperCase();
+            const isOfficialReceipt = receiptType === FiscalReceiptType.NORMAL;
+            const receiptTypeTitle =
+                receiptType === FiscalReceiptType.COPY
+                    ? 'COPY'
+                    : receiptType === FiscalReceiptType.TRAINING
+                        ? 'TRAINING'
+                        : receiptType === FiscalReceiptType.PROFORMA
+                            ? 'PROFORMA'
+                            : 'NORMAL';
+
             const drawMeta = (label: string, value: string, x: number, y: number, w: number) => {
                 doc.font('Helvetica-Bold').fontSize(7).fillColor(MUTED).text(label.toUpperCase(), x, y, { width: w });
                 doc.font('Helvetica').fontSize(8.5).fillColor(TEXT).text(value, x, y + 9, { width: w });
@@ -739,6 +1004,11 @@ export class SaleService {
                 .text('SALES RECEIPT', right - 120, headerY + 19, { width: 108, align: 'center' });
             doc.fillColor(TEXT).font('Helvetica-Bold').fontSize(8)
                 .text(`#${sale.sale_number}`, right - 120, headerY + 44, { width: 108, align: 'center' });
+            doc.font('Helvetica').fontSize(7).fillColor(MUTED)
+                .text(`Type: ${receiptTypeTitle} (${receiptLabel})`, right - 120, headerY + 58, {
+                    width: 108,
+                    align: 'center',
+                });
 
             doc.y = headerY + 96;
 
@@ -831,6 +1101,14 @@ export class SaleService {
 
             doc.y = Math.max(doc.y + totalsH + 8, rowY + 8);
 
+            if (!isOfficialReceipt) {
+                const noticeY = doc.y;
+                doc.roundedRect(left, noticeY, width, 24, 6).fill('#fff7ed').strokeColor('#fed7aa').stroke();
+                doc.font('Helvetica-Bold').fontSize(10).fillColor('#b45309')
+                    .text('THIS IS NOT AN OFFICIAL RECEIPT', left, noticeY + 7, { width, align: 'center' });
+                doc.y = noticeY + 32;
+            }
+
             // Payments
             if (sale.payments?.length) {
                 if (doc.y + 20 + sale.payments.length * 12 > bottomLimit - 60) {
@@ -851,6 +1129,43 @@ export class SaleService {
                     doc.y += 12;
                 }
             }
+
+            // VSDC Fiscal block
+            const fiscalBlockHeight = 88;
+            if (doc.y + fiscalBlockHeight > bottomLimit - 68) {
+                doc.addPage();
+                doc.y = doc.page.margins.top;
+            }
+            const fiscalY = doc.y + 6;
+            doc.roundedRect(left, fiscalY, width, fiscalBlockHeight, 8).fill(SOFT_BG).strokeColor(BORDER).lineWidth(0.8).stroke();
+            doc.font('Helvetica-Bold').fontSize(8.5).fillColor(TEXT).text('SDC INFORMATION', left + 10, fiscalY + 8);
+            doc.font('Helvetica').fontSize(7.5).fillColor(MUTED);
+            doc.text(
+                `Date: ${
+                    (sale as any).vsdc_receipt_published_at
+                        ? new Date((sale as any).vsdc_receipt_published_at).toLocaleString('en-GB')
+                        : '-'
+                }`,
+                left + 10,
+                fiscalY + 22,
+                { width: width * 0.5 },
+            );
+            doc.text(`SDC ID: ${(sale as any).vsdc_sdc_id || '-'}`, left + 10, fiscalY + 34, {
+                width: width * 0.5,
+            });
+            doc.text(
+                `Receipt Number: ${(sale as any).receipt_type_counter || '-'}/${(sale as any).receipt_global_counter || '-'} ${receiptLabel}`,
+                left + 10,
+                fiscalY + 46,
+                { width: width - 20 },
+            );
+            doc.text(`Internal Data: ${dashEvery4((sale as any).vsdc_internal_data)}`, left + 10, fiscalY + 58, {
+                width: width - 20,
+            });
+            doc.text(`Receipt Signature: ${dashEvery4((sale as any).vsdc_receipt_signature)}`, left + 10, fiscalY + 70, {
+                width: width - 20,
+            });
+            doc.y = fiscalY + fiscalBlockHeight + 8;
 
             // Footer
             const footerY = Math.min(bottomLimit - 58, doc.y + 8);

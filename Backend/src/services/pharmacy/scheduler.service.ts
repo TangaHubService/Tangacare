@@ -125,7 +125,8 @@ export class SchedulerService {
                     if (!this.ebmClient.enabled) return; // skip in stub mode
                     logger.info(`Running ${taskName}...`);
                     await this.ebmClient.processRetryQueue();
-                    logger.info(`${taskName} completed`);
+                    const stats = await this.ebmClient.getQueueStats();
+                    logger.info(`${taskName} completed`, { queue: stats });
                 } catch (error: any) {
                     logger.error(`Error in ${taskName}: ${error.message}`);
                 }

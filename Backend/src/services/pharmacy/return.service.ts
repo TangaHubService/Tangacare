@@ -16,15 +16,20 @@ import { AuditService } from './audit.service';
 import { AuditAction, AuditEntityType } from '../../entities/AuditLog.entity';
 import { CreateReturnDto, ReturnFiltersDto } from '../../dto/pharmacy.dto';
 import { generateDocumentNumber } from '../../utils/document-number.util';
+import { EBMClient, EBMSubmitPayload } from './ebm.client';
+import { FiscalInvoiceType } from '../../entities/Sale.entity';
+import { logger } from '../../middleware/logger.middleware';
 
 const ACTIVE_RETURN_STATUSES = [ReturnStatus.PENDING, ReturnStatus.APPROVED, ReturnStatus.COMPLETED];
 
 export class ReturnService {
     private returnRepository: Repository<CustomerReturn>;
+    private ebmClient: EBMClient;
 
     constructor(entityManager?: EntityManager) {
         const source = entityManager || AppDataSource;
         this.returnRepository = source.getRepository(CustomerReturn);
+        this.ebmClient = new EBMClient();
     }
 
     async generateReturnNumber(facilityId: number): Promise<string> {
@@ -331,6 +336,7 @@ export class ReturnService {
         const queryRunner = AppDataSource.createQueryRunner();
         await queryRunner.connect();
         await queryRunner.startTransaction();
+        let createdCreditNoteId: number | null = null;
 
         try {
             const customerReturn = await this.findReturnOrFail(returnId, organizationId, facilityId, queryRunner.manager);
@@ -352,6 +358,7 @@ export class ReturnService {
 
                 const savedCreditNote = await queryRunner.manager.save(creditNote);
                 customerReturn.credit_note_id = savedCreditNote.id;
+                createdCreditNoteId = savedCreditNote.id;
             }
 
             customerReturn.status = ReturnStatus.COMPLETED;
@@ -380,7 +387,13 @@ export class ReturnService {
             });
 
             await queryRunner.commitTransaction();
-            return await this.getReturn(saved.id, organizationId, facilityId);
+            const finalized = await this.getReturn(saved.id, organizationId, facilityId);
+
+            if (createdCreditNoteId) {
+                await this.submitCreditNoteFiscalNonBlocking(createdCreditNoteId, organizationId, facilityId);
+            }
+
+            return finalized;
         } catch (error) {
             if (queryRunner.isTransactionActive) {
                 await queryRunner.rollbackTransaction();
@@ -394,6 +407,85 @@ export class ReturnService {
     async generateCreditNoteNumber(facilityId: number): Promise<string> {
         void facilityId;
         return generateDocumentNumber('CN');
+    }
+
+    private extractNumber(reference: string | null | undefined, fallback: number): number {
+        const digits = String(reference || '').replace(/\D+/g, '');
+        const parsed = Number(digits);
+        return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+    }
+
+    private async submitCreditNoteFiscalNonBlocking(
+        creditNoteId: number,
+        organizationId: number,
+        facilityId: number,
+    ): Promise<void> {
+        const creditNoteRepo = AppDataSource.getRepository(CreditNote);
+        const creditNote = await creditNoteRepo.findOne({
+            where: { id: creditNoteId, organization_id: organizationId },
+            relations: ['sale', 'sale.items', 'sale.items.medicine', 'sale.facility', 'sale.payments'],
+        });
+
+        if (!creditNote) return;
+        const facility = (creditNote.sale as any)?.facility;
+        const tin = String(facility?.tin_number || facility?.tax_registration_number || '').trim();
+        if (!tin) {
+            logger.warn('[VSDC] credit note skipped due to missing facility TIN', { creditNoteId, facilityId });
+            return;
+        }
+
+        const payload: EBMSubmitPayload = {
+            sale_number: creditNote.note_number,
+            sale_id: creditNote.sale_id,
+            facility_id: facilityId,
+            organization_id: organizationId,
+            branch_id: '00',
+            invoice_number: this.extractNumber(creditNote.note_number, creditNote.id),
+            facility_tin: tin,
+            device_serial: String(facility?.ebm_device_serial || '').trim(),
+            sdc_id: String(facility?.ebm_sdcid || '').trim() || undefined,
+            mrc_no: String(facility?.ebm_device_serial || '').trim() || undefined,
+            total_amount: Number(creditNote.amount),
+            vat_amount: 0,
+            taxable_amount_b: Number(creditNote.amount),
+            customer_tin: (creditNote.sale as any)?.customer_tin || undefined,
+            invoice_type: FiscalInvoiceType.CREDIT,
+            sale_datetime: creditNote.created_at,
+            initiated_by: String((creditNote.sale as any)?.cashier_id || '0'),
+            items: [
+                {
+                    description: `Credit note ${creditNote.note_number}`,
+                    item_code: `CREDIT-${creditNote.id}`,
+                    item_class_code: undefined,
+                    tax_category: 'B',
+                    quantity: 1,
+                    unit_price: Number(creditNote.amount),
+                    taxable_amount: Number(creditNote.amount),
+                    vat_amount: 0,
+                    total: Number(creditNote.amount),
+                },
+            ],
+        };
+
+        const result = await this.ebmClient.submitCreditNote(payload);
+        if (result.success) {
+            await creditNoteRepo.update(
+                { id: creditNote.id, organization_id: organizationId },
+                {
+                    fiscal_status: 'sent',
+                    ebm_reference: result.reference || null,
+                    ebm_receipt_number: result.reference || null,
+                    vsdc_internal_data: result.internalData || null,
+                    vsdc_receipt_signature: result.receiptSignature || null,
+                    vsdc_receipt_published_at: result.publishedAt || null,
+                    vsdc_sdc_id: result.sdcId || null,
+                },
+            );
+            return;
+        }
+
+        await this.ebmClient.enqueueRetry('credit_note', creditNote.id, creditNote.sale_id, payload);
+        await creditNoteRepo.update({ id: creditNote.id, organization_id: organizationId }, { fiscal_status: 'pending' });
     }
 
     async listReturns(filters: ReturnFiltersDto): Promise<{

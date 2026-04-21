@@ -40,6 +40,29 @@ export enum FiscalStatus {
     FAILED = 'failed',
 }
 
+export enum FiscalInvoiceType {
+    NORMAL = 'normal',
+    CREDIT = 'credit',
+    DEBIT = 'debit',
+}
+
+export enum FiscalReceiptType {
+    NORMAL = 'N',
+    COPY = 'C',
+    TRAINING = 'T',
+    PROFORMA = 'P',
+}
+
+export enum FiscalReceiptLabel {
+    NS = 'NS',
+    NR = 'NR',
+    CS = 'CS',
+    CR = 'CR',
+    TS = 'TS',
+    TR = 'TR',
+    PS = 'PS',
+}
+
 /** Insurer remittance state for the insurance portion of a sale (cash co-pay is separate). */
 export enum InsurancePaymentStatus {
     NONE = 'none',
@@ -126,6 +149,39 @@ export class Sale {
     @Column({ type: 'varchar', length: 255, nullable: true })
     ebm_reference: string;
 
+    @Column({ type: 'varchar', length: 30, nullable: true })
+    customer_tin: string | null;
+
+    @Column({ type: 'varchar', length: 20, default: FiscalInvoiceType.NORMAL })
+    invoice_type: FiscalInvoiceType;
+
+    @Column({ type: 'varchar', length: 2, default: FiscalReceiptType.NORMAL })
+    receipt_type: FiscalReceiptType;
+
+    @Column({ type: 'varchar', length: 2, default: FiscalReceiptLabel.NS })
+    receipt_label: FiscalReceiptLabel;
+
+    @Column({ type: 'varchar', length: 100, nullable: true })
+    ebm_receipt_number: string | null;
+
+    @Column({ type: 'varchar', length: 128, nullable: true })
+    vsdc_internal_data: string | null;
+
+    @Column({ type: 'varchar', length: 128, nullable: true })
+    vsdc_receipt_signature: string | null;
+
+    @Column({ type: 'timestamp with time zone', nullable: true })
+    vsdc_receipt_published_at: Date | null;
+
+    @Column({ type: 'varchar', length: 64, nullable: true })
+    vsdc_sdc_id: string | null;
+
+    @Column({ type: 'bigint', nullable: true })
+    receipt_type_counter: number | null;
+
+    @Column({ type: 'bigint', nullable: true })
+    receipt_global_counter: number | null;
+
     @Column({ type: 'int', nullable: true })
     organization_id: number;
 
@@ -196,6 +252,9 @@ export class SaleItem {
 
     @Column({ type: 'decimal', precision: 10, scale: 2 })
     total_price: number;
+
+    @Column({ type: 'varchar', length: 2, default: 'B' })
+    tax_category: string;
 
     @Column({ type: 'int', nullable: true })
     organization_id: number;
